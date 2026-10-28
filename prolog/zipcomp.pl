@@ -28,16 +28,48 @@ compile_procedure(Clause, procedure(Func/Arity, Instrs)) :-
 % First pass: Argument I lives in slot 8+I-1; a variable that is a whole argument stays there.
 match_args([], _) --> [].
 match_args([X|Xs], Slot0) -->
+    { last_flag(Xs, Last) },
     (   { var(X) } -> [argvar(X, Slot0)] % the whole argument is a variable
-    ;   match_arg(X)
+    ;   match_arg(X, Last) % reuse to determine if its last or not
     ),
     { Slot is Slot0 + 1 },
     match_args(Xs, Slot).
 
-match_arg(V)     --> { var(V) }, [firstvar(V)]. % variable inside the structure
-match_arg([])    --> [constnil].
-match_arg(N)     --> { integer(N) }, [immed(N)].
-match_arg([H|T]) --> [conslist], match_arg(H), match_arg(T).
+last_flag([], last).
+last_flag([_|_], notlast).
+
+match_arg(V, _)  --> { var(V) }, [firstvar(V)]. % variable inside the structure
+match_arg([], _) --> [constnil].
+match_arg(N, _)  --> { integer(N) }, [immed(N)].
+match_arg([H|T], Last) -->
+    (   { Last == last } -> [lastconslist] ; [conslist] ),
+    match_arg(H, notlast), % the tail still follows the head
+    match_arg(T, last),    % the tail is the last part of the cell
+    (   { Last == last } -> [] ; [pop] ).
+
+% [] is a constant: nothing to go into.
+?- phrase(match_args([[]], 8), Is).
+   Is = [constnil].
+
+% [1] is the last argument: nothing follows, so no pop.
+?- phrase(match_args([[1]], 8), Is).
+   Is = [lastconslist, immed(1), constnil].
+
+% [1] is followed by the argument 2: pop to get back out first.
+?- phrase(match_args([[1], 2], 8), Is).
+   Is = [conslist, immed(1), constnil, pop, immed(2)].
+
+% [1,2] is [1|[2|[]]]: the tail is the last part of a cell, so lastconslist.
+?- phrase(match_args([[1, 2]], 8), Is).
+   Is = [lastconslist, immed(1), lastconslist, immed(2), constnil].
+
+% The whole [1,2] chain shares one pop.
+?- phrase(match_args([[1, 2], 3], 8), Is).
+   Is = [conslist, immed(1), lastconslist, immed(2), constnil, pop, immed(3)].
+
+% [[1]]: the inner [1] is a head, its tail [] follows it, so it needs its own pop.
+?- phrase(match_args([[[1]], 2], 8), Is).
+   Is = [conslist, conslist, immed(1), constnil, pop, constnil, pop, immed(2)].
 
 % Second pass: Seen pairs each variable already met with its slot, Free is the next free local slot.
 slots([], _, _, _) --> [].
