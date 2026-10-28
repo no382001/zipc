@@ -18,13 +18,29 @@ include(Goal, [L|Ls0], Ls) :-
         include(Goal, Ls0, Rest).
 
 compile_procedure(Clause, procedure(Func/Arity, Instrs)) :-
-    functor(Clause, Func, Arity),
-    Clause =.. [_|Args],
+    clause_parts(Clause, Head, Body),
+    functor(Head, Func, Arity),
+    Head =.. [_|Args],
     singletons(Clause, Singles),
     phrase(match_args(Args, 8), Instrs0),
     FirstLocal is 8 + Arity,
-    phrase(slots(Instrs0, Singles, [], FirstLocal, FrameSize), Instrs1),
-    append(Instrs1, [return(FrameSize)], Instrs).
+    phrase((slots(Instrs0, Singles, [], Seen, FirstLocal, FrameSize), body(Body, Seen, FrameSize)), Instrs).
+
+clause_parts((Head :- Body), Head, Body) :- !.
+clause_parts(Head, Head, true).
+
+% A fact returns; a single goal pushes its arguments and jumps to it.
+body(true, _, FrameSize) --> !, [return(FrameSize)].
+body(Goal, Seen, FrameSize) -->
+    { functor(Goal, F, N), Goal =.. [_|Args] },
+    [argmode(FrameSize)],
+    body_args(Args, Seen),
+    [proceed(F/N, N)].
+
+body_args([], _) --> [].
+body_args([A|As], Seen) -->
+    { var_slot(A, Seen, Slot) }, [var(Slot)], % only variables seen in the head for now
+    body_args(As, Seen).
 
 % First pass: Argument I lives in slot 8+I-1; a variable that is a whole argument stays there.
 match_args([], _) --> [].
@@ -78,10 +94,10 @@ match_arg(L, Last) -->
    Is = [lastconslist, immed(1), firstvar(T)].
 
 % Second pass: Seen pairs each variable already met with its slot, Free is the next free local slot.
-slots([], _, _, Free, Free) --> []. % the next free slot is the frame size
-slots([Instr|Instrs], Singles, Seen0, Free0, FrameSize) -->
-    slot(Instr, Singles, Seen0, Seen, Free0, Free),
-    slots(Instrs, Singles, Seen, Free, FrameSize).
+slots([], _, Seen, Seen, Free, Free) --> []. % the next free slot is the frame size
+slots([Instr|Instrs], Singles, Seen0, Seen, Free0, FrameSize) -->
+    slot(Instr, Singles, Seen0, Seen1, Free0, Free),
+    slots(Instrs, Singles, Seen1, Seen, Free, FrameSize).
 
 slot(argvar(V, ArgSlot), _, Seen0, Seen, Free, Free) -->
     (   { var_slot(V, Seen0, Slot) } -> [var(Slot)], { Seen = Seen0 } % seen: unify with its slot
@@ -132,19 +148,19 @@ singletons(T, Singles) :-
        return(12)
    ]).
 
-% ?- compile_procedure((concatenate([X|L1], L2, [X|L3]) :- concatenate(L1, L2, L3)), Proc).
-%    Proc = procedure(concatenate/3, [
-%        conslist,
-%        firstvar(13),
-%        firstvar(11),
-%        pop,
-%        skipvar,
-%        lastconslist,
-%        var(13),
-%        firstvar(12),
-%        argmode(14),
-%        var(11),
-%        var(9),
-%        var(12),
-%        proceed(concatenate/3, 3)
-%    ]).
+?- compile_procedure((concatenate([X|L1], L2, [X|L3]) :- concatenate(L1, L2, L3)), Proc).
+   Proc = procedure(concatenate/3, [
+       conslist,
+       firstvar(13), % X gets top slot bc its discarded first
+       firstvar(11),
+       pop,
+       skipvar,
+       lastconslist,
+       var(13),
+       firstvar(12),
+       argmode(14),
+       var(11),
+       var(9),
+       var(12),
+       proceed(concatenate/3, 3)
+   ]).
