@@ -39,9 +39,10 @@ last_flag([], last).
 last_flag([_|_], notlast).
 
 match_arg(V, _)  --> { var(V) }, [firstvar(V)]. % variable inside the structure
-match_arg([], _) --> [constnil].
+match_arg(L, _) --> { L == [] }, [constnil].
 match_arg(N, _)  --> { integer(N) }, [immed(N)].
-match_arg([H|T], Last) -->
+match_arg(L, Last) -->
+    { nonvar(L), L = [H|T] },
     (   { Last == last } -> [lastconslist] ; [conslist] ),
     match_arg(H, notlast), % the tail still follows the head
     match_arg(T, last),    % the tail is the last part of the cell
@@ -70,6 +71,10 @@ match_arg([H|T], Last) -->
 % [[1]]: the inner [1] is a head, its tail [] follows it, so it needs its own pop.
 ?- phrase(match_args([[[1]], 2], 8), Is).
    Is = [conslist, conslist, immed(1), constnil, pop, constnil, pop, immed(2)].
+
+% An unbound tail is a variable, not a list: exactly one answer, T stays unbound.
+?- phrase(match_args([[1|T]], 8), Is).
+   Is = [lastconslist, immed(1), firstvar(T)].
 
 % Second pass: Seen pairs each variable already met with its slot, Free is the next free local slot.
 slots([], _, _, _) --> [].
