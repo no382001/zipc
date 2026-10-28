@@ -42,6 +42,26 @@ body_args([A|As], Seen) -->
     { var_slot(A, Seen, Slot) }, [var(Slot)], % only variables seen in the head for now
     body_args(As, Seen).
 
+% A fact: no goal to call, just return.
+?- phrase(body(true, [], 11), Is).
+   Is = [return(11)].
+
+% Each argument is pushed from the slot the head gave it, in argument order.
+?- phrase(body(f(A, B), [A-9, B-11], 12), Is).
+   Is = [argmode(12), var(9), var(11), proceed(f/2, 2)].
+
+% An argument can be pushed more than once.
+?- phrase(body(f(A, A), [A-11], 12), Is).
+   Is = [argmode(12), var(11), var(11), proceed(f/2, 2)].
+
+% An atom goal has no arguments to push.
+?- phrase(body(g, [], 11), Is).
+   Is = [argmode(11), proceed(g/0, 0)].
+
+% a variable the head never saw.
+?- phrase(body(f(C), [], 11), Is).
+   false.
+
 % First pass: Argument I lives in slot 8+I-1; a variable that is a whole argument stays there.
 match_args([], _) --> [].
 match_args([X|Xs], Slot0) -->
