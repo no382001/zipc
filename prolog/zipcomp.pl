@@ -23,7 +23,8 @@ compile_procedure(Clause, procedure(Func/Arity, Instrs)) :-
     singletons(Clause, Singles),
     phrase(match_args(Args, 8), Instrs0),
     FirstLocal is 8 + Arity,
-    phrase(slots(Instrs0, Singles, [], FirstLocal), Instrs).
+    phrase(slots(Instrs0, Singles, [], FirstLocal, FrameSize), Instrs1),
+    append(Instrs1, [return(FrameSize)], Instrs).
 
 % First pass: Argument I lives in slot 8+I-1; a variable that is a whole argument stays there.
 match_args([], _) --> [].
@@ -77,10 +78,10 @@ match_arg(L, Last) -->
    Is = [lastconslist, immed(1), firstvar(T)].
 
 % Second pass: Seen pairs each variable already met with its slot, Free is the next free local slot.
-slots([], _, _, _) --> [].
-slots([Instr|Instrs], Singles, Seen0, Free0) -->
+slots([], _, _, Free, Free) --> []. % the next free slot is the frame size
+slots([Instr|Instrs], Singles, Seen0, Free0, FrameSize) -->
     slot(Instr, Singles, Seen0, Seen, Free0, Free),
-    slots(Instrs, Singles, Seen, Free).
+    slots(Instrs, Singles, Seen, Free, FrameSize).
 
 slot(argvar(V, ArgSlot), _, Seen0, Seen, Free, Free) -->
     (   { var_slot(V, Seen0, Slot) } -> [var(Slot)], { Seen = Seen0 } % seen: unify with its slot
@@ -114,7 +115,8 @@ singletons(T, Singles) :-
    Proc = procedure(concatenate/3, [
        constnil,
        skipvar,
-       var(9)
+       var(9),
+       return(11) % no locals: frame size is 8 + 3 arguments
    ]).
 
 ?- compile_procedure(concatenate([X|L1], L2, [X|L3]), Proc).
