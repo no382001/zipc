@@ -28,8 +28,7 @@ compile_procedure(Clause, procedure(Func/Arity, Instrs)) :-
     singletons(Clause, Singles),
     assign_slots(Head, Body, Singles, Locals, FrameSize),
     phrase(match_args(Args, 8), Instrs0),
-    FirstLocal is 8 + Arity,
-    phrase((slots(Instrs0, Singles, [], Seen, FirstLocal, FrameSize), body(Body, Seen, FrameSize)), Instrs).
+    phrase((slots(Instrs0, Singles, Locals, [], Seen), body(Body, Seen, FrameSize)), Instrs).
 
 %% clause_parts(+Clause, -Head, -Body) is det.
 %  Splits a rule at :-; a fact has the body true.
@@ -129,25 +128,25 @@ match_arg(L, Last) -->
 ?- phrase(match_args([[1|T]], 8), Is).
    Is = [lastconslist, immed(1), firstvar(T)].
 
-%% slots(+Instrs, +Singles, +Seen0, -Seen, +Free0, -FrameSize)// is det.
-%  Second pass: Seen pairs each variable already met with its slot, Free is the next free local slot.
-slots([], _, Seen, Seen, Free, Free) --> []. % the next free slot is the frame size
-slots([Instr|Instrs], Singles, Seen0, Seen, Free0, FrameSize) -->
-    slot(Instr, Singles, Seen0, Seen1, Free0, Free),
-    slots(Instrs, Singles, Seen1, Seen, Free, FrameSize).
+%% slots(+Instrs, +Singles, +Locals, +Seen0, -Seen)// is det.
+%  Second pass: Seen pairs each variable already met with its slot, Locals gives each local's slot.
+slots([], _, _, Seen, Seen) --> [].
+slots([Instr|Instrs], Singles, Locals, Seen0, Seen) -->
+    slot(Instr, Singles, Locals, Seen0, Seen1),
+    slots(Instrs, Singles, Locals, Seen1, Seen).
 
-%% slot(+Instr, +Singles, +Seen0, -Seen, +Free0, -Free)// is det.
+%% slot(+Instr, +Singles, +Locals, +Seen0, -Seen)// is det.
 %  Numbers one first-pass instruction; anything but a variable passes through.
-slot(argvar(V, ArgSlot), _, Seen0, Seen, Free, Free) -->
+slot(argvar(V, ArgSlot), _, _, Seen0, Seen) -->
     (   { var_slot(V, Seen0, Slot) } -> [var(Slot)], { Seen = Seen0 } % seen: unify with its slot
     ;   [skipvar], { Seen = [V-ArgSlot|Seen0] } % first: already in its arg slot
     ).
-slot(firstvar(V), Singles, Seen0, Seen, Free0, Free) -->
-    (   { var_slot(V, Seen0, Slot) } -> [var(Slot)], { Seen = Seen0, Free = Free0 }
-    ;   { member(S, Singles), S == V } -> [void], { Seen = Seen0, Free = Free0 } % used once: no slot
-    ;   [firstvar(Free0)], { Seen = [V-Free0|Seen0], Free is Free0 + 1 }
+slot(firstvar(V), Singles, Locals, Seen0, Seen) -->
+    (   { var_slot(V, Seen0, Slot) } -> [var(Slot)], { Seen = Seen0 }
+    ;   { member(S, Singles), S == V } -> [void], { Seen = Seen0 } % used once: no slot
+    ;   { var_slot(V, Locals, Slot) }, [firstvar(Slot)], { Seen = [V-Slot|Seen0] } % slot decided by assign_slots
     ).
-slot(Instr, _, Seen, Seen, Free, Free) -->
+slot(Instr, _, _, Seen, Seen) -->
     { Instr \= argvar(_, _), Instr \= firstvar(_) }, % not a variable
     [Instr]. % pass through unchanged
 
