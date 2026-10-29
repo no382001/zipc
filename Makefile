@@ -20,8 +20,8 @@ $(GEN)/gen.pl: $(BUILD)/codegen | $(GEN)
 	$(BUILD)/codegen > $@.tmp
 	mv $@.tmp $@
 
-$(GEN)/%.bin: prolog/%.pl prolog/zipasm.pl prolog/encode.pl $(GEN)/gen.pl | $(GEN)
-	$(SCRYER) -f prolog/zipasm.pl $< -g main -g halt < /dev/null
+$(GEN)/%.bin: prolog/%.pl prolog/assemble.pl prolog/encode.pl $(GEN)/gen.pl | $(GEN)
+	$(SCRYER) -f prolog/assemble.pl $< -g main -g halt < /dev/null
 	mv zipd.bin $@
 
 $(BUILD)/zip: $(SRCS) $(HDRS) | $(BUILD)

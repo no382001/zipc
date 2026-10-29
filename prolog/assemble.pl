@@ -12,7 +12,7 @@
 %%%% Entry
 
 main :-
-    catch(generate, E, (format(user_error, "zipasm: ~q~n", [E]), halt(1))).
+    catch(generate, E, (format(user_error, "assemble: ~q~n", [E]), halt(1))).
 
 generate :-
     findall(P-Cs, zip_procedure(P, Cs), Procedures),

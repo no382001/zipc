@@ -6,7 +6,7 @@
 
 #include "zip.h"
 
-// An image written by prolog/zipasm.pl. The inntegers are little-endian.
+// An image written by prolog/assemble.pl. The inntegers are little-endian.
 //
 //   image     = "ZIP" version:u8 procedure_count:u8 query_count:u8
 //               procedure* query*
