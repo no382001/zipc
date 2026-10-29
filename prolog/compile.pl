@@ -3,6 +3,7 @@
 :- use_module(library(dcgs)).
 :- use_module(library(pairs)).
 :- use_module(library(lambda)).
+:- use_module(library(charsio)).
 
 :- use_module('../build/gen/gen').
 :- use_module(encode).
@@ -243,3 +244,55 @@ number_slots(Vars, Slot0, Locals, FrameSize) :- % the next free slot is the fram
        var(12),
        proceed(concatenate/3, 3)
    ]).
+
+%% compile_query(+Text, -Query) is semidet.
+%  Query is zip_query(Text, Names, Instrs) for the query in the chars Text, ending in a dot.
+%  Named variables get slots 8, 9, ... in the order of Names
+compile_query(Text, zip_query(Text, Names, Instrs)) :-
+    read_term_from_chars(Text, Goal, [variable_names(VNs)]),
+    maplist(\ (Name=_)^Chars^atom_chars(Name, Chars), VNs, Names),
+    maplist(\ (_=V)^V^true, VNs, Named),
+    term_variables(Named-Goal, Vars), % named first, then any _
+    number_slots(Vars, 8, Locals, FrameSize),
+    functor(Goal, F, N),
+    Goal =.. [_|Args],
+    phrase(foldl(\A^match_arg(A, notlast), Args), Instrs0), % ARG mode: every list ends in pop
+    phrase(slots(Instrs0, [], Locals, [], _), Instrs1),
+    append([[argmode(FrameSize)], Instrs1, [call(F/N), halt]], Instrs).
+
+% The three queries from concat.pl.
+?- compile_query("concatenate([1,2],[3],Z).", Q).
+   Q = zip_query("concatenate([1,2],[3],Z).", ["Z"], [
+       argmode(9),
+       conslist, immed(1), lastconslist, immed(2), constnil, pop,
+       conslist, immed(3), constnil, pop,
+       firstvar(8),
+       call(concatenate/3),
+       halt
+   ]).
+
+?- compile_query("concatenate(X,Y,[1,2,3]).", Q).
+   Q = zip_query("concatenate(X,Y,[1,2,3]).", ["X", "Y"], [
+       argmode(10),
+       firstvar(8),
+       firstvar(9),
+       conslist, immed(1), lastconslist, immed(2),
+       lastconslist, immed(3), constnil, pop,
+       call(concatenate/3),
+       halt
+   ]).
+
+% No variables
+?- compile_query("concatenate([1],[2],[1,3]).", Q).
+   Q = zip_query("concatenate([1],[2],[1,3]).", [], [
+       argmode(8),
+       conslist, immed(1), constnil, pop,
+       conslist, immed(2), constnil, pop,
+       conslist, immed(1), lastconslist, immed(3), constnil, pop,
+       call(concatenate/3),
+       halt
+   ]).
+
+% A variable used twice is var after its firstvar.
+?- compile_query("f(X,X).", Q).
+   Q = zip_query("f(X,X).", ["X"], [argmode(9), firstvar(8), var(8), call(f/2), halt]).
