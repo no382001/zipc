@@ -7,7 +7,8 @@
 :- use_module('../build/gen/gen').
 :- use_module(encode).
 
-% from clpz.pl
+%% include(:Goal, +List, -Included) is det.
+%  Included are the elements of List for which Goal succeeds. Copied from clpz.pl.
 :- meta_predicate(include(1, ?, ?)).
 include(_, [], []).
 include(Goal, [L|Ls0], Ls) :-
@@ -17,19 +18,26 @@ include(Goal, [L|Ls0], Ls) :-
         ),
         include(Goal, Ls0, Rest).
 
+%% compile_procedure(+Clause, -Procedure) is semidet.
+%  Procedure is procedure(Func/Arity, Instrs), the ZIP code for the fact or rule Clause.
+%  Fails on terms the compiler does not handle yet.
 compile_procedure(Clause, procedure(Func/Arity, Instrs)) :-
     clause_parts(Clause, Head, Body),
     functor(Head, Func, Arity),
     Head =.. [_|Args],
     singletons(Clause, Singles),
+    assign_slots(Head, Body, Singles, Locals, FrameSize),
     phrase(match_args(Args, 8), Instrs0),
     FirstLocal is 8 + Arity,
     phrase((slots(Instrs0, Singles, [], Seen, FirstLocal, FrameSize), body(Body, Seen, FrameSize)), Instrs).
 
+%% clause_parts(+Clause, -Head, -Body) is det.
+%  Splits a rule at :-; a fact has the body true.
 clause_parts((Head :- Body), Head, Body) :- !.
 clause_parts(Head, Head, true).
 
-% A fact returns; a single goal pushes its arguments and jumps to it.
+%% body(+Goal, +Seen, +FrameSize)// is semidet.
+%  A fact returns; a single goal pushes its arguments and jumps to it.
 body(true, _, FrameSize) --> !, [return(FrameSize)].
 body(Goal, Seen, FrameSize) -->
     { functor(Goal, F, N), Goal =.. [_|Args] },
@@ -37,9 +45,11 @@ body(Goal, Seen, FrameSize) -->
     body_args(Args, Seen),
     [proceed(F/N, N)].
 
+%% body_args(+Args, +Seen)// is semidet.
+%  Pushes each argument from its slot in Seen; fails on one that is not there.
 body_args([], _) --> [].
 body_args([A|As], Seen) -->
-    { var_slot(A, Seen, Slot) }, [var(Slot)], % only variables seen in the head for now
+    { var_slot(A, Seen, Slot) }, [var(Slot)], % TODO: only variables seen in the head for now
     body_args(As, Seen).
 
 % A fact: no goal to call, just return.
@@ -62,7 +72,9 @@ body_args([A|As], Seen) -->
 ?- phrase(body(f(C), [], 11), Is).
    false.
 
-% First pass: Argument I lives in slot 8+I-1; a variable that is a whole argument stays there.
+%% match_args(+Args, +Slot0)// is semidet.
+%  First pass: Argument I lives in slot 8+I-1; a variable that is a whole argument stays there.
+%  Variables come out as argvar(V, Slot) and firstvar(V), for slots//6 to number.
 match_args([], _) --> [].
 match_args([X|Xs], Slot0) -->
     { last_flag(Xs, Last) },
@@ -72,9 +84,13 @@ match_args([X|Xs], Slot0) -->
     { Slot is Slot0 + 1 },
     match_args(Xs, Slot).
 
+%% last_flag(+Rest, -Last) is det.
+%  Last is last when nothing follows, notlast otherwise.
 last_flag([], last).
 last_flag([_|_], notlast).
 
+%% match_arg(+Term, +Last)// is semidet.
+%  Matches Term inside an argument; Last says whether anything follows it at this level.
 match_arg(V, _)  --> { var(V) }, [firstvar(V)]. % variable inside the structure
 match_arg(L, _) --> { L == [] }, [constnil].
 match_arg(N, _)  --> { integer(N) }, [immed(N)].
@@ -113,12 +129,15 @@ match_arg(L, Last) -->
 ?- phrase(match_args([[1|T]], 8), Is).
    Is = [lastconslist, immed(1), firstvar(T)].
 
-% Second pass: Seen pairs each variable already met with its slot, Free is the next free local slot.
+%% slots(+Instrs, +Singles, +Seen0, -Seen, +Free0, -FrameSize)// is det.
+%  Second pass: Seen pairs each variable already met with its slot, Free is the next free local slot.
 slots([], _, Seen, Seen, Free, Free) --> []. % the next free slot is the frame size
 slots([Instr|Instrs], Singles, Seen0, Seen, Free0, FrameSize) -->
     slot(Instr, Singles, Seen0, Seen1, Free0, Free),
     slots(Instrs, Singles, Seen1, Seen, Free, FrameSize).
 
+%% slot(+Instr, +Singles, +Seen0, -Seen, +Free0, -Free)// is det.
+%  Numbers one first-pass instruction; anything but a variable passes through.
 slot(argvar(V, ArgSlot), _, Seen0, Seen, Free, Free) -->
     (   { var_slot(V, Seen0, Slot) } -> [var(Slot)], { Seen = Seen0 } % seen: unify with its slot
     ;   [skipvar], { Seen = [V-ArgSlot|Seen0] } % first: already in its arg slot
@@ -132,20 +151,61 @@ slot(Instr, _, Seen, Seen, Free, Free) -->
     { Instr \= argvar(_, _), Instr \= firstvar(_) }, % not a variable
     [Instr]. % pass through unchanged
 
+%% var_slot(+V, +Seen, -Slot) is semidet.
+%  Slot is V's slot in Seen; fails if V has not been seen.
 var_slot(V, [V1-Slot1|Seen], Slot) :-
     (   V == V1 -> Slot = Slot1 % == so an unseen V never unifies with another
     ;   var_slot(V, Seen, Slot) % keep looking
     ).
 
+%% occurrences(+Term)// is det.
+%  Every variable occurrence in Term, left to right, repeats included.
 occurrences(T) -->
     (   { var(T) } -> [T]
     ;   { T =.. [_|Args] }, foldl(occurrences, Args)
     ).
 
+%% singletons(+Term, -Singles) is det.
+%  Singles are the variables that occur exactly once in Term.
 singletons(T, Singles) :-
     phrase(occurrences(T), Occs),
     term_variables(T, Vs),
     include(Occs+\V^include(==(V), Occs, [_]), Vs, Singles).
+
+
+%% assign_slots(+Head, +Body, +Singles, -Locals, -FrameSize) is det.
+%  Decides every local's slot: body variables first, then head-only.
+%  Locals pairs each variable with its slot, FrameSize is the first slot after them.
+assign_slots(Head, Body, Singles, Locals, FrameSize) :-
+    functor(Head, _, Arity),
+    Head =.. [_|Args],
+    include(var, Args, ArgVars), % already live in their argument slot
+    append(ArgVars, Singles, NoSlot), % singletons are void: no slot either
+    term_variables(Body-Head, Vars), % body first, each variable once
+    include(NoSlot+\V^(\+ (member(W, NoSlot), W == V)), Vars, LocalVars),
+    FirstLocal is 8 + Arity,
+    number_slots(LocalVars, FirstLocal, Locals, FrameSize).
+
+%% number_slots(+Vars, +Slot0, -Locals, -FrameSize) is det.
+%  Pairs each of Vars with consecutive slots from Slot0.
+number_slots(Vars, Slot0, Locals, FrameSize) :- % the next free slot is the frame size
+    foldl(\V^(V-S0)^S0^S^(S is S0 + 1), Vars, Locals, Slot0, FrameSize).
+
+% Body variables get the low slots, the head-only X comes last; L2 keeps argument slot 9.
+?- assign_slots(concatenate([X|L1], L2, [X|L3]), concatenate(L1, L2, L3), [], Locals, FrameSize).
+   Locals = [L1-11, L3-12, X-13], FrameSize = 14.
+
+% Only whole-argument variables: no locals, the frame is just 8 + arity.
+?- assign_slots(concatenate([], L, L), true, [], Locals, FrameSize).
+   Locals = [], FrameSize = 11.
+
+% Singletons are void and get no slot.
+?- assign_slots(concatenate([X|L1], L2, [X|L3]), true, [L1, L3], Locals, FrameSize).
+   Locals = [X-11], FrameSize = 12.
+
+% A variable first met in the body still needs a local.
+?- assign_slots(f(X), g(X, Y, Y), [], Locals, FrameSize).
+   Locals = [Y-9], FrameSize = 10.
 
 ?- compile_procedure(concatenate([], L, L), Proc).
    Proc = procedure(concatenate/3, [
