@@ -14,11 +14,14 @@
 main :-
     catch(generate, E, (format(user_error, "assemble: ~q~n", [E]), halt(1))).
 
-generate :-
+generate :- generate('zipd.bin').
+
+% Writes the image for the zip_procedure/2 and zip_query/3 facts to File.
+generate(File) :-
     findall(P-Cs, zip_procedure(P, Cs), Procedures),
     findall(query(T, Vs, Is), zip_query(T, Vs, Is), Queries),
     phrase(image(Procedures, Queries), Bytes),
-    open('zipd.bin', write, S, [type(binary)]),
+    open(File, write, S, [type(binary)]),
     maplist(put_byte(S), Bytes),
     close(S).
 

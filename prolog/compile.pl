@@ -31,6 +31,31 @@ compile_procedure(Clause, procedure(Func/Arity, Instrs)) :-
     phrase(match_args(Args, 8), Instrs0),
     phrase((slots(Instrs0, Singles, Locals, [], Seen), body(Body, Seen, FrameSize)), Instrs).
 
+%% clause_key(+Clause, -Key) is det.
+%  Key is what the VM indexes the clause on: the type of its first argument.
+clause_key(Clause, Key) :-
+    clause_parts(Clause, Head, _),
+    (   functor(Head, _, 0) -> Key = any
+    ;   arg(1, Head, A),
+        (   var(A) -> Key = any
+        ;   A == [] -> Key = nil
+        ;   A = [_|_] -> Key = cons
+        ;   integer(A) -> Key = A
+        )
+    ).
+
+?- clause_key(concatenate([], L, L), Key).
+   Key = nil.
+?- clause_key((concatenate([X|L1], L2, [X|L3]) :- concatenate(L1, L2, L3)), Key).
+   Key = cons.
+?- clause_key(f(3), Key).
+   Key = 3.
+% A variable first argument matches anything, and so does no argument at all.
+?- clause_key(f(X), Key).
+   Key = any.
+?- clause_key(g, Key).
+   Key = any.
+
 %% clause_parts(+Clause, -Head, -Body) is det.
 %  Splits a rule at :-; a fact has the body true.
 clause_parts((Head :- Body), Head, Body) :- !.
