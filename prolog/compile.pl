@@ -1,3 +1,14 @@
+:- module(compile, [
+    compile_clause/2,
+    compile_goal/2,
+    compile_procedure/2,
+    compile_query/2,
+    clause_key/2,
+    clause_parts/3,
+    singletons/2,
+    assign_slots/5
+]).
+
 :- use_module(library(lists)).
 :- use_module(library(format)).
 :- use_module(library(dcgs)).
@@ -18,6 +29,31 @@ include(Goal, [L|Ls0], Ls) :-
         ;   Ls = Rest
         ),
         include(Goal, Ls0, Rest).
+
+%% compile_clause(+Clause, -Pair) is det.
+%  Pair is Func/Arity-clause(Key, Instrs), ready to group into procedures.
+%  Throws on a clause the compiler does not handle yet.
+compile_clause(Clause, P-clause(Key, Instrs)) :-
+    compile_or_throw(compile_procedure(Clause, procedure(P, Instrs)), Clause),
+    clause_key(Clause, Key).
+
+%% compile_goal(+Query, -ZipQuery) is det.
+%  ZipQuery is zip_query(Text, Names, Instrs) for Query, a Goal-VariableNames
+%  as read from a ?- Goal directive. Throws on a goal it does not handle yet.
+compile_goal(Goal-VNs, Q) :-
+    query_text(Goal, VNs, Text),
+    compile_or_throw(compile_query(Text, Q), Goal).
+
+%% query_text(+Goal, +VNs, -Text) is det.
+%  Text is Goal as the VM prints it after ?-, with its variable names and the dot.
+query_text(Goal, VNs, Text) :-
+    write_term_to_chars(Goal, [quoted(true), variable_names(VNs)], Cs),
+    append(Cs, ".", Text).
+
+compile_or_throw(Goal, Term) :-
+    (   call(Goal) -> true
+    ;   throw(error(domain_error(compilable, Term), compile/2))
+    ).
 
 %% compile_procedure(+Clause, -Procedure) is semidet.
 %  Procedure is procedure(Func/Arity, Instrs), the ZIP code for the fact or rule Clause.

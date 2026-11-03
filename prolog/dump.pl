@@ -1,10 +1,13 @@
+:- module(dump, [dump/2]).
+
 :- use_module(library(lists)).
 :- use_module(library(format)).
 :- use_module(library(pairs)).
 :- use_module(library(charsio)).
 :- use_module(library(lambda)).
-
-% Uses read_file/3, compile_clause/2 and step/3 from main.pl.
+:- use_module(log).
+:- use_module(consult).
+:- use_module(compile).
 
 %% dump(+Source, +Color) is det.
 %  Prints the code for the program in the file Source, a section per clause.
@@ -17,11 +20,11 @@ dump(Source, Color) :-
 :- dynamic(color/0).
 
 dump_file(Source) :-
-    step("read", "~a", [Source]),
-    read_file(Source, Clauses, Queries),
-    length(Clauses, NC), length(Queries, NQ),
+    read_file(Source, Clauses, Goals),
+    length(Clauses, NC), length(Goals, NQ),
     step("compile", "~d clauses, ~d queries", [NC, NQ]),
     maplist(source_clause, Clauses, Pairs),
+    maplist(compile_goal, Goals, Queries),
     group_pairs_by_key(Pairs, Procedures),
     maplist(dump_procedure, Procedures),
     maplist(dump_query, Queries).

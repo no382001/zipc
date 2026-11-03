@@ -1,25 +1,20 @@
+:- module(assemble, [generate/3]).
+
 :- use_module(library(lists)).
 :- use_module(library(format)).
 :- use_module(library(dcgs)).
 :- use_module(library(pairs)).
+:- use_module(library(lambda)).
 :- use_module('../build/gen/gen').
 :- use_module(encode).
 
-% a program file may define no queries, or no procedures.
-:- dynamic(zip_procedure/2).
-:- dynamic(zip_query/3).
-
 %%%% Entry
 
-main :-
-    catch(generate, E, (format(user_error, "assemble: ~q~n", [E]), halt(1))).
-
-generate :- generate('zipd.bin').
-
-% Writes the image for the zip_procedure/2 and zip_query/3 facts to File.
-generate(File) :-
-    findall(P-Cs, zip_procedure(P, Cs), Procedures),
-    findall(query(T, Vs, Is), zip_query(T, Vs, Is), Queries),
+%% generate(+Procedures, +Queries, +File) is det.
+%  Writes the image to File. Procedures are Func/Arity-Clauses, Queries are
+%  zip_query(Text, Names, Instrs); either list may be empty.
+generate(Procedures, ZipQueries, File) :-
+    maplist(\ (zip_query(T, Vs, Is))^query(T, Vs, Is)^true, ZipQueries, Queries),
     phrase(image(Procedures, Queries), Bytes),
     open(File, write, S, [type(binary)]),
     maplist(put_byte(S), Bytes),
@@ -73,18 +68,18 @@ queries([query(Text, Variables, Instructions)|Qs], Names) -->
 % The instructions are assembled first because that fills the external
 % reference table, which comes before them in the image.
 code(Instructions, Names) -->
-    { phrase(instructions(Instructions, [], References), Bytes),
+    { phrase(instructions(Instructions, Names, [], References), Bytes),
       length(References, NR),
       length(Bytes, NB) },
     encode:u8(NR), references(References, Names),
     encode:u16(NB), seq(Bytes).
 
-instructions([], References, References) --> [].
-instructions([I|Is], References0, References) -->
-    instruction(I, References0, References1),
-    instructions(Is, References1, References).
+instructions([], _, References, References) --> [].
+instructions([I|Is], Names, References0, References) -->
+    instruction(I, Names, References0, References1),
+    instructions(Is, Names, References1, References).
 
-instruction(I, References0, References) -->
+instruction(I, Names, References0, References) -->
     { I =.. [Mnemonic|Operands],
       (   gen:opcode(Mnemonic, Opcode, Kinds) -> true
       ;   throw(error(existence_error(zip_instruction, I), instruction//3))
@@ -94,22 +89,22 @@ instruction(I, References0, References) -->
       ;   throw(error(domain_error(operand_count(Mnemonic, N), I), instruction//3))
       ) },
     [Opcode],
-    operands(Kinds, Operands, References0, References).
+    operands(Kinds, Operands, Names, References0, References).
 
-operands([], [], References, References) --> [].
-operands([K|Ks], [O|Os], References0, References) -->
-    operand(K, O, References0, References1),
-    operands(Ks, Os, References1, References).
+operands([], [], _, References, References) --> [].
+operands([K|Ks], [O|Os], Names, References0, References) -->
+    operand(K, O, Names, References0, References1),
+    operands(Ks, Os, Names, References1, References).
 
-operand(byte, X, References, References) --> { encode:must_be_byte(X) }, [X].
-operand(local, X, References, References) --> { encode:must_be_byte(X) }, [X].
-operand(procedure, P, References0, References) -->
-    { (   zip_procedure(P, _) -> true
+operand(byte, X, _, References, References) --> { encode:must_be_byte(X) }, [X].
+operand(local, X, _, References, References) --> { encode:must_be_byte(X) }, [X].
+operand(procedure, P, Names, References0, References) -->
+    { (   memberchk(P, Names) -> true
       ;   throw(error(existence_error(procedure, P), instruction//3))
       ),
       reference_slot(procedure(P), Slot, References0, References) },
     [Slot].
-operand(constant, C, References0, References) -->
+operand(constant, C, _, References0, References) -->
     { (   (C == [] ; integer(C)) -> true
       ;   throw(error(domain_error(zip_constant, C), instruction//3))
       ),

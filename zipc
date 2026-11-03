@@ -5,5 +5,5 @@
 dir=$(dirname "$0")/prolog
 color=
 [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && color=--color
-exec ${SCRYER:-scryer-prolog} -f "$dir/compile.pl" "$dir/assemble.pl" "$dir/main.pl" "$dir/dump.pl" \
+exec ${SCRYER:-scryer-prolog} -f "$dir/main.pl" \
     -g zipc -g halt -- $color "$@" < /dev/null
