@@ -7,16 +7,14 @@ bats_require_minimum_version 1.5.0
 setup() {
     ROOT=$(cd "$BATS_TEST_DIRNAME/.." && pwd)
     ZIPC="$ROOT/zipc"
-    ZIP=${ZIP:-$ROOT/build/zip}
+    export ZIP=${ZIP:-$ROOT/build/zip}
     T=$BATS_TEST_TMPDIR
 }
 
 run_program() {
     local expected
     expected=$(cat)
-    run "$ZIPC" "$ROOT/test/$1.pl" "$T/$1.bin"
-    [ "$status" -eq 0 ]
-    run "$ZIP" "$T/$1.bin"
+    run --separate-stderr "$ZIPC" -r "$ROOT/test/$1.pl"
     [ "$status" -eq 0 ]
     diff -u <(echo "$expected") <(echo "$output")
 }
@@ -71,10 +69,91 @@ EOF
     [[ "$stderr" == *"compile   2 clauses, 3 queries"* ]]
 }
 
-@test "usage error" {
-    run "$ZIPC"
+@test "-r compiles, then runs on the VM" {
+    run --separate-stderr "$ZIPC" -r "$ROOT/test/concat.pl"
+    [ "$status" -eq 0 ]
+    [[ "$stderr" == *"write     "* ]]
+    [[ "$stderr" == *"run       $ROOT/test/concat.pl"* ]]
+    [[ "$output" == "?- concatenate([1,2],[3],Z)."* ]]
+}
+
+@test "-r with IMAGE keeps the image" {
+    run --separate-stderr "$ZIPC" -r "$ROOT/test/concat.pl" "$T/c.bin"
+    [ "$status" -eq 0 ]
+    [ -s "$T/c.bin" ]
+}
+
+@test "-r does not run when compiling fails" {
+    printf 'f :- g.\n?- f.\n' > "$T/u.pl"
+    run --separate-stderr "$ZIPC" -r "$T/u.pl"
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"undefined procedure g/0"* ]]
+    [[ "$stderr" != *"run       "* ]]
+    [ -z "$output" ]
+}
+
+@test "-r uses the VM in ZIP" {
+    ZIP=/nonexistent run "$ZIPC" -r "$ROOT/test/concat.pl"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"no VM at /nonexistent"* ]]
+}
+
+@test "-ar runs hand-written code" {
+    run --separate-stderr "$ZIPC" -ar "$ROOT/test/concat.asm.pl"
+    [ "$status" -eq 0 ]
+    [[ "$output" == "?- concatenate([1,2],[3],Z)."* ]]
+}
+
+@test "-dr lists, then runs, reading the file once" {
+    run --separate-stderr "$ZIPC" -dr "$ROOT/test/concat.pl"
+    [ "$status" -eq 0 ]
+    [[ "$output" == "concatenate/3"* ]]
+    [[ "$output" == *"   Z = [1,2,3]."* ]]
+    [ "$(grep -c 'read  ' <<< "$stderr")" -eq 1 ]
+}
+
+@test "chained and separate flags are the same" {
+    run --separate-stderr "$ZIPC" -dr "$ROOT/test/concat.pl"
+    local chained=$output
+    run --separate-stderr "$ZIPC" -d -r "$ROOT/test/concat.pl"
+    [ "$output" = "$chained" ]
+}
+
+@test "-d with IMAGE lists and writes" {
+    run --separate-stderr "$ZIPC" -d "$ROOT/test/concat.pl" "$T/c.bin"
+    [ "$status" -eq 0 ]
+    [[ "$output" == "concatenate/3"* ]]
+    [ -s "$T/c.bin" ]
+}
+
+@test "usage errors" {
+    for args in "" "$ROOT/test/concat.pl" "-x $ROOT/test/concat.pl" "-ad $ROOT/test/concat.asm.pl" "-r"; do
+        run $ZIPC $args
+        [ "$status" -eq 2 ]
+        [[ "$output" == usage:* ]]
+    done
+}
+
+@test "-h prints the usage made from the specs" {
+    run --separate-stderr "$ZIPC" -h
+    [ "$status" -eq 0 ]
+    [[ "${lines[0]}" == "usage: zipc [-adrh] [--color] FILE [IMAGE]" ]]
+    [[ "$output" == *"-r, --run"* ]]
+    [[ "$output" == *"    --color"* ]]
+}
+
+@test "long flags work the same as short ones" {
+    run --separate-stderr "$ZIPC" -dr "$ROOT/test/concat.pl"
+    local short=$output
+    run --separate-stderr "$ZIPC" --dump --run "$ROOT/test/concat.pl"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$short" ]
+}
+
+@test "unknown options are named" {
+    run "$ZIPC" --nope "$ROOT/test/concat.pl"
     [ "$status" -eq 2 ]
-    [[ "$output" == usage:* ]]
+    [[ "$output" == *"zipc: unknown option --nope"* ]]
 }
 
 @test "consult takes the clauses but not the queries" {
@@ -100,8 +179,7 @@ EOF
 @test "consult takes an absolute path" {
     echo ":- consult('$ROOT/test/concat.pl')." > "$T/abs.pl"
     echo "?- concatenate([1],[2],X)." >> "$T/abs.pl"
-    "$ZIPC" "$T/abs.pl" "$T/abs.bin"
-    run "$ZIP" "$T/abs.bin"
+    run --separate-stderr "$ZIPC" -r "$T/abs.pl"
     [ "$output" = "$(printf '?- concatenate([1],[2],X).\n   X = [1,2].')" ]
 }
 

@@ -1,9 +1,14 @@
 #!/bin/sh
-# zipc FILE.pl IMAGE   compile FILE.pl and write the image to IMAGE
-# zipc -d FILE.pl      print the code compile.pl makes for FILE.pl
-# zipc -a FILE.asm.pl IMAGE   assemble hand-written code into IMAGE
-dir=$(dirname "$0")/prolog
+# zipc [-adrh] [--color] FILE [IMAGE]; zipc -h lists the options. The command
+# line is handled by prolog/cli.pl; this sets up what it needs: ZIP, the VM
+# for -r (default build/zip), and ZIPC_TMP, a temporary image for -r.
+root=$(dirname "$0")
+export ZIP="${ZIP:-$root/build/zip}"
+ZIPC_TMP=$(mktemp "${TMPDIR:-/tmp}/zipc.XXXXXX") || exit 1
+export ZIPC_TMP
+trap 'rm -f "$ZIPC_TMP"' EXIT
+trap 'exit 130' INT TERM PIPE HUP
 color=
 [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && color=--color
-exec ${SCRYER:-scryer-prolog} -f "$dir/main.pl" \
+${SCRYER:-scryer-prolog} -f "$root/prolog/cli.pl" \
     -g zipc -g halt -- $color "$@" < /dev/null

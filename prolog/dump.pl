@@ -1,33 +1,25 @@
-:- module(dump, [dump/2]).
+:- module(dump, [dump_program/3]).
 
 :- use_module(library(lists)).
 :- use_module(library(format)).
 :- use_module(library(pairs)).
 :- use_module(library(charsio)).
 :- use_module(library(lambda)).
-:- use_module(log).
-:- use_module(consult).
 :- use_module(compile).
 
-%% dump(+Source, +Color) is det.
-%  Prints the code for the program in the file Source, a section per clause.
-%  Color is true for ANSI colors.
-dump(Source, Color) :-
+%% dump_program(+Clauses, +Goals, +Color) is det.
+%  Prints the code for a program as read_file/3 gives it, a section per
+%  clause and query. Color is true for ANSI colors.
+dump_program(Clauses, Goals, Color) :-
     retractall(color),
     (   Color == true -> assertz(color) ; true ),
-    catch(dump_file(Source), E, (format(user_error, "dump: ~q~n", [E]), halt(1))).
-
-:- dynamic(color/0).
-
-dump_file(Source) :-
-    read_file(Source, Clauses, Goals),
-    length(Clauses, NC), length(Goals, NQ),
-    step("compile", "~d clauses, ~d queries", [NC, NQ]),
     maplist(source_clause, Clauses, Pairs),
     maplist(compile_goal, Goals, Queries),
     group_pairs_by_key(Pairs, Procedures),
     maplist(dump_procedure, Procedures),
     maplist(dump_query, Queries).
+
+:- dynamic(color/0).
 
 % Pair is Func/Arity-(Text-Names-clause(Key, Instrs)), Text the clause as it
 % was read.
