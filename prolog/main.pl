@@ -14,9 +14,7 @@ zipc :-
     zipc(Args, Color).
 
 zipc(["-d", Source], Color) :- !, atom_chars(S, Source), dump(S, Color).
-zipc(["-a", Asm, Image], _) :- !,
-    atom_chars(A, Asm), atom_chars(I, Image),
-    catch((consult(A), generate(I)), E, (format(user_error, "assemble: ~q~n", [E]), halt(1))).
+zipc(["-a", Asm, Image], _) :- !, atom_chars(A, Asm), atom_chars(I, Image), assemble(A, I).
 zipc([Source, Image], _) :- !, atom_chars(S, Source), atom_chars(I, Image), main(S, I).
 zipc(_, _) :-
     format(user_error, "usage: zipc FILE.pl IMAGE | zipc -d FILE.pl | zipc -a FILE.asm.pl IMAGE~n", []),
@@ -27,14 +25,36 @@ zipc(_, _) :-
 main(Source, Image) :-
     catch(build(Source, Image), E, (format(user_error, "main: ~q~n", [E]), halt(1))).
 
+%% assemble(+Asm, +Image) is det.
+%  Writes the image for the hand-written code in the file Asm to the file Image.
+assemble(Asm, Image) :-
+    catch(assemble_(Asm, Image), E, (format(user_error, "assemble: ~q~n", [E]), halt(1))).
+
+assemble_(Asm, Image) :-
+    step("load", "~a", [Asm]),
+    consult(Asm),
+    step("write", "~a", [Image]),
+    generate(Image).
+
 build(Source, Image) :-
     compile_file(Source),
+    step("write", "~a", [Image]),
     generate(Image).
+
+%% step(+Tag, +Format, +Args) is det.
+%  Prints a progress line to stderr, in the same layout as the Makefile's.
+step(Tag, Format, Args) :-
+    format(user_error, "  ~s~t~12|", [Tag]),
+    format(user_error, Format, Args),
+    nl(user_error).
 
 %% compile_file(+Source) is det.
 %  Asserts zip_procedure/2 and zip_query/3 for the program in the file Source.
 compile_file(Source) :-
+    step("read", "~a", [Source]),
     read_file(Source, Clauses, Queries),
+    length(Clauses, NC), length(Queries, NQ),
+    step("compile", "~d clauses, ~d queries", [NC, NQ]),
     maplist(\ (C-_)^compile_clause(C), Clauses, Pairs),
     group_pairs_by_key(Pairs, Procedures), % the clauses of a procedure must be together
     maplist(\ (P-Cs)^assertz(zip_procedure(P, Cs)), Procedures),

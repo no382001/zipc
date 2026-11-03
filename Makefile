@@ -3,6 +3,16 @@ CPPFLAGS   := -Isrc
 SANFLAGS   ?= -fsanitize=address,undefined -fno-omit-frame-pointer
 
 SCRYER     ?= scryer-prolog
+PL         = $(SCRYER) -f prolog/compile.pl prolog/assemble.pl prolog/main.pl
+
+# make V=1 prints the full commands
+ifeq ($(V),1)
+Q   :=
+say := @:
+else
+Q   := @
+say := @printf '  %-9s %s\n'
+endif
 
 BUILD := build
 GEN   := $(BUILD)/gen
@@ -15,33 +25,40 @@ PROLOG := prolog/compile.pl prolog/assemble.pl prolog/main.pl prolog/dump.pl pro
 all: $(BUILD)/zip $(GEN)/gen.pl $(GEN)/concat.bin
 
 $(BUILD)/codegen: src/codegen.c src/zip.c $(HDRS) | $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ src/codegen.c src/zip.c
+	$(say) CC $@
+	$(Q)$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ src/codegen.c src/zip.c
 
 $(GEN)/gen.pl: $(BUILD)/codegen | $(GEN)
-	$(BUILD)/codegen > $@.tmp
-	mv $@.tmp $@
+	$(say) CODEGEN $@
+	$(Q)$(BUILD)/codegen > $@.tmp
+	$(Q)mv $@.tmp $@
 
-$(GEN)/%.bin: test/%.pl zipc $(PROLOG) $(GEN)/gen.pl | $(GEN)
-	SCRYER=$(SCRYER) ./zipc $< $@
+$(GEN)/%.bin: test/%.pl $(PROLOG) $(GEN)/gen.pl | $(GEN)
+	$(Q)$(PL) -g "main('$<', '$@')" -g halt < /dev/null
 
-$(GEN)/asm/%.bin: test/%.asm.pl zipc $(PROLOG) $(GEN)/gen.pl | $(GEN)/asm
-	SCRYER=$(SCRYER) ./zipc -a $< $@
+$(GEN)/asm/%.bin: test/%.asm.pl $(PROLOG) $(GEN)/gen.pl | $(GEN)/asm
+	$(Q)$(PL) -g "assemble('$<', '$@')" -g halt < /dev/null
 
 $(BUILD)/zip: $(SRCS) $(HDRS) | $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(SRCS)
+	$(say) CC $@
+	$(Q)$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(SRCS)
 
 $(BUILD)/zip-san: $(SRCS) $(HDRS) | $(BUILD)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(SANFLAGS) -o $@ $(SRCS)
+	$(say) CC $@
+	$(Q)$(CC) $(CPPFLAGS) $(CFLAGS) $(SANFLAGS) -o $@ $(SRCS)
 
 test: $(BUILD)/zip $(GEN)/concat.bin $(GEN)/asm/concat.bin
-	cmp $(GEN)/concat.bin $(GEN)/asm/concat.bin
-	$(BUILD)/zip $(GEN)/concat.bin | diff -u test/concat.expected -
+	$(say) CMP "$(GEN)/concat.bin $(GEN)/asm/concat.bin"
+	$(Q)cmp $(GEN)/concat.bin $(GEN)/asm/concat.bin
+	$(say) RUN $(GEN)/concat.bin
+	$(Q)$(BUILD)/zip $(GEN)/concat.bin | diff -u test/concat.expected -
 
 sanitize: $(BUILD)/zip-san $(GEN)/concat.bin
-	$(BUILD)/zip-san $(GEN)/concat.bin | diff -u test/concat.expected -
+	$(say) RUN-SAN $(GEN)/concat.bin
+	$(Q)$(BUILD)/zip-san $(GEN)/concat.bin | diff -u test/concat.expected -
 
 $(BUILD) $(GEN) $(GEN)/asm:
-	mkdir -p $@
+	$(Q)mkdir -p $@
 
 clean:
 	rm -rf $(BUILD)
