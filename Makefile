@@ -8,7 +8,7 @@ BUILD := build
 GEN   := $(BUILD)/gen
 SRCS  := src/zip.c src/image.c src/main.c
 HDRS  := src/zip.h src/image.h
-PROLOG := prolog/compile.pl prolog/assemble.pl prolog/main.pl prolog/encode.pl
+PROLOG := prolog/compile.pl prolog/assemble.pl prolog/main.pl prolog/dump.pl prolog/encode.pl
 
 .PHONY: all test sanitize clean format format-check
 
@@ -21,12 +21,11 @@ $(GEN)/gen.pl: $(BUILD)/codegen | $(GEN)
 	$(BUILD)/codegen > $@.tmp
 	mv $@.tmp $@
 
-$(GEN)/%.bin: test/%.pl $(PROLOG) $(GEN)/gen.pl | $(GEN)
-	$(SCRYER) -f prolog/compile.pl prolog/assemble.pl prolog/main.pl -g "main('$<', '$@')" -g halt < /dev/null
+$(GEN)/%.bin: test/%.pl zipc $(PROLOG) $(GEN)/gen.pl | $(GEN)
+	SCRYER=$(SCRYER) ./zipc $< $@
 
-$(GEN)/asm/%.bin: test/%.asm.pl prolog/assemble.pl prolog/encode.pl $(GEN)/gen.pl | $(GEN)/asm
-	$(SCRYER) -f prolog/assemble.pl $< -g main -g halt < /dev/null
-	mv zipd.bin $@
+$(GEN)/asm/%.bin: test/%.asm.pl zipc $(PROLOG) $(GEN)/gen.pl | $(GEN)/asm
+	SCRYER=$(SCRYER) ./zipc -a $< $@
 
 $(BUILD)/zip: $(SRCS) $(HDRS) | $(BUILD)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(SRCS)

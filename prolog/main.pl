@@ -3,11 +3,24 @@
 :- use_module(library(pairs)).
 :- use_module(library(charsio)).
 :- use_module(library(lambda)).
+:- use_module(library(os)).
 
 % Compiles a file of clauses and ?- queries with compile.pl, then writes the
-% image with assemble.pl.
-%   scryer-prolog -f prolog/compile.pl prolog/assemble.pl prolog/main.pl \
-%       -g "main('test/concat.pl', 'build/gen/concat.bin')" -g halt
+% image with assemble.pl. Run it through zipc, which loads the files.
+
+zipc :-
+    argv(Args0),
+    (   select("--color", Args0, Args) -> Color = true ; Color = false, Args = Args0 ),
+    zipc(Args, Color).
+
+zipc(["-d", Source], Color) :- !, atom_chars(S, Source), dump(S, Color).
+zipc(["-a", Asm, Image], _) :- !,
+    atom_chars(A, Asm), atom_chars(I, Image),
+    catch((consult(A), generate(I)), E, (format(user_error, "assemble: ~q~n", [E]), halt(1))).
+zipc([Source, Image], _) :- !, atom_chars(S, Source), atom_chars(I, Image), main(S, I).
+zipc(_, _) :-
+    format(user_error, "usage: zipc FILE.pl IMAGE | zipc -d FILE.pl | zipc -a FILE.asm.pl IMAGE~n", []),
+    halt(2).
 
 %% main(+Source, +Image) is det.
 %  Writes the image for the program in the file Source to the file Image.
@@ -15,15 +28,21 @@ main(Source, Image) :-
     catch(build(Source, Image), E, (format(user_error, "main: ~q~n", [E]), halt(1))).
 
 build(Source, Image) :-
-    read_file(Source, Clauses, Queries),
-    maplist(compile_clause, Clauses, Pairs),
-    group_pairs_by_key(Pairs, Procedures), % the clauses of a procedure must be together
-    maplist(\ (P-Cs)^assertz(zip_procedure(P, Cs)), Procedures),
-    maplist(\ (zip_query(T, Vs, Is))^assertz(zip_query(T, Vs, Is)), Queries),
+    compile_file(Source),
     generate(Image).
 
+%% compile_file(+Source) is det.
+%  Asserts zip_procedure/2 and zip_query/3 for the program in the file Source.
+compile_file(Source) :-
+    read_file(Source, Clauses, Queries),
+    maplist(\ (C-_)^compile_clause(C), Clauses, Pairs),
+    group_pairs_by_key(Pairs, Procedures), % the clauses of a procedure must be together
+    maplist(\ (P-Cs)^assertz(zip_procedure(P, Cs)), Procedures),
+    maplist(\ (zip_query(T, Vs, Is))^assertz(zip_query(T, Vs, Is)), Queries).
+
 %% read_file(+Source, -Clauses, -Queries) is det.
-%  Clauses are the clauses of the file, Queries its ?- queries already compiled.
+%  Clauses are the clauses of the file as Clause-VariableNames, Queries its ?-
+%  queries already compiled.
 read_file(Source, Clauses, Queries) :-
     open(Source, read, S),
     read_items(S, Clauses, Queries),
@@ -37,7 +56,7 @@ read_items(S, Clauses, Queries) :-
         compile_or_throw(compile_query(Text, Q), Goal),
         Queries = [Q|Queries1],
         read_items(S, Clauses, Queries1)
-    ;   Clauses = [T|Clauses1],
+    ;   Clauses = [T-VNs|Clauses1],
         read_items(S, Clauses1, Queries)
     ).
 

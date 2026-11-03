@@ -1,0 +1,9 @@
+#!/bin/sh
+# zipc FILE.pl IMAGE   compile FILE.pl and write the image to IMAGE
+# zipc -d FILE.pl      print the code compile.pl makes for FILE.pl
+# zipc -a FILE.asm.pl IMAGE   assemble hand-written code into IMAGE
+dir=$(dirname "$0")/prolog
+color=
+[ -t 1 ] && [ -z "${NO_COLOR:-}" ] && color=--color
+exec ${SCRYER:-scryer-prolog} -f "$dir/compile.pl" "$dir/assemble.pl" "$dir/main.pl" "$dir/dump.pl" \
+    -g zipc -g halt -- $color "$@" < /dev/null
