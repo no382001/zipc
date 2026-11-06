@@ -100,11 +100,25 @@ clause_parts(Head, Head, true).
 %% body(+Goal, +Seen, +FrameSize)// is semidet.
 %  A fact returns; a single goal pushes its arguments and jumps to it.
 body(true, _, FrameSize) --> !, [return(FrameSize)].
+body((A,B), Seen, FrameSize) --> !,
+    [enter(FrameSize)],
+    goals((A,B),Seen).
+
 body(Goal, Seen, FrameSize) -->
     { functor(Goal, F, N), Goal =.. [_|Args] },
     [argmode(FrameSize)],
     body_args(Args, Seen),
     [proceed(F/N, N)].
+
+goals((A,B),Seen) --> !,
+    { functor(A, F, N), A =.. [_|Args] },
+    body_args(Args, Seen),
+    [call(F/N)],
+    goals(B,Seen).
+goals(A,Seen) --> 
+    { functor(A, F, N), A =.. [_|Args] },
+    body_args(Args, Seen),
+    [depart(F/N,N)].
 
 %% body_args(+Args, +Seen)// is semidet.
 %  Pushes each argument from its slot in Seen; fails on one that is not there.
@@ -132,6 +146,9 @@ body_args([A|As], Seen) -->
 % a variable the head never saw.
 ?- phrase(body(f(C), [], 11), Is).
    false.
+
+?- phrase(body((f(A), g(A)), [A-8], 9), Is).
+   Is = [enter(9), var(8), call(f/1), var(8), depart(g/1, 1)].
 
 %% match_args(+Args, +Slot0)// is semidet.
 %  First pass: Argument I lives in slot 8+I-1; a variable that is a whole argument stays there.

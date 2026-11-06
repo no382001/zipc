@@ -68,7 +68,7 @@ static bool bind(zip_machine_t *m, word_t *variable, word_t value) {
 
 // returns true on success, false on failure or error
 static bool unify(zip_machine_t *m, word_t a, word_t b) {
-  word_t pending[2 * UNIFY_DEPTH];
+  word_t pending[2 * UNIFY_DEPTH]; // TODO move this to ctx
   size_t n = 0;
 
   for (;;) {
