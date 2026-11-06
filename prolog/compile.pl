@@ -65,7 +65,7 @@ compile_procedure(Clause, procedure(Func/Arity, Instrs)) :-
     singletons(Clause, Singles),
     assign_slots(Head, Body, Singles, Locals, FrameSize),
     phrase(match_args(Args, 8), Instrs0),
-    phrase((slots(Instrs0, Singles, Locals, [], Seen), body(Body, Seen, FrameSize)), Instrs).
+    phrase((slots(Instrs0, Singles, Locals, [], Seen), body(Body, Singles, Locals, Seen, FrameSize)), Instrs).
 
 %% clause_key(+Clause, -Key) is det.
 %  Key is what the VM indexes the clause on: the type of its first argument.
@@ -97,58 +97,68 @@ clause_key(Clause, Key) :-
 clause_parts((Head :- Body), Head, Body) :- !.
 clause_parts(Head, Head, true).
 
-%% body(+Goal, +Seen, +FrameSize)// is semidet.
-%  A fact returns; a single goal pushes its arguments and jumps to it.
-body(true, _, FrameSize) --> !, [return(FrameSize)].
-body((A,B), Seen, FrameSize) --> !,
+%% body(+Goal, +Singles, +Locals, +Seen, +FrameSize)// is semidet.
+%  A fact returns; a single goal pushes its arguments and jumps to it;
+%  several goals call all but the last, which departs.
+body(true, _, _, _, FrameSize) --> !, [return(FrameSize)].
+body((A,B), Singles, Locals, Seen, FrameSize) --> !,
     [enter(FrameSize)],
-    goals((A,B),Seen).
-
-body(Goal, Seen, FrameSize) -->
+    goals((A,B), Singles, Locals, Seen).
+body(Goal, Singles, Locals, Seen, FrameSize) -->
     { functor(Goal, F, N), Goal =.. [_|Args] },
     [argmode(FrameSize)],
-    body_args(Args, Seen),
+    goal_args(Args, Singles, Locals, Seen, _),
     [proceed(F/N, N)].
 
-goals((A,B),Seen) --> !,
+%% goals(+Goals, +Singles, +Locals, +Seen)// is semidet.
+%  Each goal pushes its arguments; all but the last are called, the last departs.
+goals((A,B), Singles, Locals, Seen0) --> !,
     { functor(A, F, N), A =.. [_|Args] },
-    body_args(Args, Seen),
+    goal_args(Args, Singles, Locals, Seen0, Seen),
     [call(F/N)],
-    goals(B,Seen).
-goals(A,Seen) --> 
+    goals(B, Singles, Locals, Seen).
+goals(A, Singles, Locals, Seen0) -->
     { functor(A, F, N), A =.. [_|Args] },
-    body_args(Args, Seen),
-    [depart(F/N,N)].
+    goal_args(Args, Singles, Locals, Seen0, _),
+    [depart(F/N, N)].
 
-%% body_args(+Args, +Seen)// is semidet.
-%  Pushes each argument from its slot in Seen; fails on one that is not there.
-body_args([], _) --> [].
-body_args([A|As], Seen) -->
-    { var_slot(A, Seen, Slot) }, [var(Slot)], % TODO: only variables seen in the head for now
-    body_args(As, Seen).
+%% goal_args(+Args, +Singles, +Locals, +Seen0, -Seen)// is semidet.
+%  Builds each argument in ARG mode, so every list ends in pop. A variable met
+%  for the first time is a firstvar in its slot from Locals, and joins Seen.
+goal_args(Args, Singles, Locals, Seen0, Seen) -->
+    { phrase(foldl(\A^match_arg(A, notlast), Args), Instrs0) },
+    slots(Instrs0, Singles, Locals, Seen0, Seen).
 
 % A fact: no goal to call, just return.
-?- phrase(body(true, [], 11), Is).
+?- phrase(body(true, [], [], [], 11), Is).
    Is = [return(11)].
 
 % Each argument is pushed from the slot the head gave it, in argument order.
-?- phrase(body(f(A, B), [A-9, B-11], 12), Is).
+?- phrase(body(f(A, B), [], [], [A-9, B-11], 12), Is).
    Is = [argmode(12), var(9), var(11), proceed(f/2, 2)].
 
 % An argument can be pushed more than once.
-?- phrase(body(f(A, A), [A-11], 12), Is).
+?- phrase(body(f(A, A), [], [], [A-11], 12), Is).
    Is = [argmode(12), var(11), var(11), proceed(f/2, 2)].
 
 % An atom goal has no arguments to push.
-?- phrase(body(g, [], 11), Is).
+?- phrase(body(g, [], [], [], 11), Is).
    Is = [argmode(11), proceed(g/0, 0)].
 
-% a variable the head never saw.
-?- phrase(body(f(C), [], 11), Is).
-   false.
+% A variable the head never saw is a firstvar in its local slot.
+?- phrase(body(f(C), [], [C-11], [], 12), Is).
+   Is = [argmode(12), firstvar(11), proceed(f/1, 1)].
 
-?- phrase(body((f(A), g(A)), [A-8], 9), Is).
+% A list argument is built, and ends in pop.
+?- phrase(body(f([A]), [], [], [A-8], 9), Is).
+   Is = [argmode(9), conslist, var(8), constnil, pop, proceed(f/1, 1)].
+
+?- phrase(body((f(A), g(A)), [], [], [A-8], 9), Is).
    Is = [enter(9), var(8), call(f/1), var(8), depart(g/1, 1)].
+
+% A variable first met in one goal is a var in the next.
+?- phrase(body((f(C), g(C)), [], [C-9], [], 10), Is).
+   Is = [enter(10), firstvar(9), call(f/1), var(9), depart(g/1, 1)].
 
 %% match_args(+Args, +Slot0)// is semidet.
 %  First pass: Argument I lives in slot 8+I-1; a variable that is a whole argument stays there.
@@ -321,6 +331,27 @@ number_slots(Vars, Slot0, Locals, FrameSize) :- % the next free slot is the fram
        var(9),
        var(12),
        proceed(concatenate/3, 3)
+   ]).
+
+% RT is first met in the body: firstvar in the first goal, var in the second.
+?- compile_procedure((nrev([H|T], R) :- nrev(T, RT), concatenate(RT, [H], R)), Proc).
+   Proc = procedure(nrev/2, [
+       conslist,
+       firstvar(12),
+       firstvar(10),
+       pop,
+       skipvar,
+       enter(13),
+       var(10),
+       firstvar(11),
+       call(nrev/2),
+       var(11),
+       conslist,
+       var(12),
+       constnil,
+       pop,
+       var(9),
+       depart(concatenate/3, 3)
    ]).
 
 %% compile_query(+Text, -Query) is semidet.

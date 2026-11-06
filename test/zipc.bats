@@ -41,7 +41,6 @@ EOF
 }
 
 @test "nrev runs" {
-    skip "phase 1: bodies with several goals"
     run_program nrev <<'EOF'
 ?- nrev([],R).
    R = [].
