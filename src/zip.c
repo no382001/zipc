@@ -10,6 +10,7 @@
 #define UNIFY_DEPTH 256
 
 const zip_opcode_info_t zip_opcodes[] = {
+    {OPCODE_VOID, "void", 0, {0}},
     {OPCODE_VAR, "var", 1, {OPERAND_LOCAL}},
     {OPCODE_FIRSTVAR, "firstvar", 1, {OPERAND_LOCAL}},
     {OPCODE_POP, "pop", 0, {0}},
@@ -264,6 +265,23 @@ zip_status_t zip_run(zip_machine_t *m) {
 
       ANY_MODE(OPCODE_SKIPVAR) : m->data++;
       break;
+
+    case DISPATCH(MODE_MATCH, OPCODE_VOID):
+      m->data++;
+      break;
+    case DISPATCH(MODE_COPY, OPCODE_VOID): {
+      word_t *p = m->data++;
+      *p = MAKE_REFERENCE(p);
+      break;
+    }
+    case DISPATCH(MODE_ARGUMENT, OPCODE_VOID): {
+      word_t *p = new_global(m, 1);
+      if (p == NULL)
+        goto fail;
+      *p = MAKE_REFERENCE(p);
+      *m->data++ = MAKE_REFERENCE(p);
+      break;
+    }
 
     case DISPATCH(MODE_MATCH, OPCODE_FIRSTVAR):
       m->current_frame[*m->program_counter++] = *m->data++;

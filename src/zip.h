@@ -26,6 +26,7 @@ enum {
 #define ATOM_NIL MAKE_ATOM(0)
 
 typedef enum {
+  OPCODE_VOID = 1,      // unify an anonymous variable
   OPCODE_VAR = 4,       // unify subsequent occurrence of variable
   OPCODE_FIRSTVAR = 5,  // unify first occurrence of local or temporary variable
   OPCODE_POP = 7,       // complete a compound term

@@ -67,6 +67,27 @@ EOF
 EOF
 }
 
+@test "anonymous variables in heads and bodies" {
+    cat > "$T/v.pl" <<'EOF'
+first([X|_], X).
+g(_, 1).
+h(R) :- g(_, R).
+?- first([1,2], X).
+?- first(L, 1).
+?- h(R).
+EOF
+    run --separate-stderr "$ZIPC" -r "$T/v.pl"
+    [ "$status" -eq 0 ]
+    diff -u - <(echo "$output") <<'EOF'
+?- first([1,2],X).
+   X = 1.
+?- first(L,1).
+   L = [1|_G2].
+?- h(R).
+   R = 1.
+EOF
+}
+
 @test "steps go to stderr, not stdout" {
     run --separate-stderr "$ZIPC" "$ROOT/test/concat.pl" "$T/c.bin"
     [ "$status" -eq 0 ]

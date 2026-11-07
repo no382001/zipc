@@ -65,7 +65,18 @@ compile_procedure(Clause, procedure(Func/Arity, Instrs)) :-
     singletons(Clause, Singles),
     assign_slots(Head, Body, Singles, Locals, FrameSize),
     phrase(match_args(Args, 8), Instrs0),
-    phrase((slots(Instrs0, Singles, Locals, [], Seen), body(Body, Singles, Locals, Seen, FrameSize)), Instrs).
+    arg_slots(Args, 8, [], ArgSeen),
+    phrase((slots(Instrs0, Singles, Locals, ArgSeen, Seen), body(Body, Singles, Locals, Seen, FrameSize)), Instrs).
+
+%% arg_slots(+Args, +Slot, +Seen0, -Seen) is det.
+%  Seen pairs each argument variable with its argument slot, the first if it
+%  is in several. They hold their value before the head runs, so a variable
+%  met inside an earlier argument already has a slot.
+arg_slots([], _, Seen, Seen).
+arg_slots([A|As], Slot, Seen0, Seen) :-
+    (   var(A), \+ var_slot(A, Seen0, _) -> Seen1 = [A-Slot|Seen0] ; Seen1 = Seen0 ),
+    Slot1 is Slot + 1,
+    arg_slots(As, Slot1, Seen1, Seen).
 
 %% clause_key(+Clause, -Key) is det.
 %  Key is what the VM indexes the clause on: the type of its first argument.
@@ -227,8 +238,8 @@ slots([Instr|Instrs], Singles, Locals, Seen0, Seen) -->
 %% slot(+Instr, +Singles, +Locals, +Seen0, -Seen)// is det.
 %  Numbers one first-pass instruction; anything but a variable passes through.
 slot(argvar(V, ArgSlot), _, _, Seen0, Seen) -->
-    (   { var_slot(V, Seen0, Slot) } -> [var(Slot)], { Seen = Seen0 } % seen: unify with its slot
-    ;   [skipvar], { Seen = [V-ArgSlot|Seen0] } % first: already in its arg slot
+    (   { var_slot(V, Seen0, Slot), Slot =\= ArgSlot } -> [var(Slot)], { Seen = Seen0 } % seen: unify with its slot
+    ;   [skipvar], { Seen = [V-ArgSlot|Seen0] } % already in its arg slot
     ).
 slot(firstvar(V), Singles, Locals, Seen0, Seen) -->
     (   { var_slot(V, Seen0, Slot) } -> [var(Slot)], { Seen = Seen0 }
