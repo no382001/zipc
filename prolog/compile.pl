@@ -363,11 +363,21 @@ compile_query(Text, zip_query(Text, Names, Instrs)) :-
     maplist(\ (_=V)^V^true, VNs, Named),
     term_variables(Named-Goal, Vars), % named first, then any _
     number_slots(Vars, 8, Locals, FrameSize),
-    functor(Goal, F, N),
-    Goal =.. [_|Args],
-    phrase(foldl(\A^match_arg(A, notlast), Args), Instrs0), % ARG mode: every list ends in pop
-    phrase(slots(Instrs0, [], Locals, [], _), Instrs1),
-    append([[argmode(FrameSize)], Instrs1, [call(F/N), halt]], Instrs).
+    (   Goal = (_,_) -> Neck = enter(FrameSize) ; Neck = argmode(FrameSize) ),
+    phrase(([Neck], query_goals(Goal, Locals, []), [halt]), Instrs).
+
+%% query_goals(+Goals, +Locals, +Seen)// is semidet.
+%  Like goals//4, but every goal is called, and the query halts after the last.
+query_goals((A,B), Locals, Seen0) --> !,
+    query_goal(A, Locals, Seen0, Seen),
+    query_goals(B, Locals, Seen).
+query_goals(A, Locals, Seen0) -->
+    query_goal(A, Locals, Seen0, _).
+
+query_goal(Goal, Locals, Seen0, Seen) -->
+    { functor(Goal, F, N), Goal =.. [_|Args] },
+    goal_args(Args, [], Locals, Seen0, Seen),
+    [call(F/N)].
 
 % The three queries from concat.pl.
 ?- compile_query("concatenate([1,2],[3],Z).", Q).
@@ -405,3 +415,7 @@ compile_query(Text, zip_query(Text, Names, Instrs)) :-
 % A variable used twice is var after its firstvar.
 ?- compile_query("f(X,X).", Q).
    Q = zip_query("f(X,X).", ["X"], [argmode(9), firstvar(8), var(8), call(f/2), halt]).
+
+% Several goals: each is called, and a variable is first met only once.
+?- compile_query("f(X),g(X).", Q).
+   Q = zip_query("f(X),g(X).", ["X"], [enter(9), firstvar(8), call(f/1), var(8), call(g/1), halt]).

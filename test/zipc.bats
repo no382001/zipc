@@ -51,6 +51,22 @@ EOF
 EOF
 }
 
+@test "a query with several goals backtracks into each" {
+    cat > "$T/q.pl" <<EOF
+:- consult('$ROOT/test/concat').
+?- concatenate(X,Y,[1,2]), concatenate(Y,X,Z).
+EOF
+    run --separate-stderr "$ZIPC" -r "$T/q.pl"
+    [ "$status" -eq 0 ]
+    diff -u - <(echo "$output") <<'EOF'
+?- concatenate(X,Y,[1,2]),concatenate(Y,X,Z).
+   X = [], Y = [1,2], Z = [1,2]
+;  X = [1], Y = [2], Z = [2,1]
+;  X = [1,2], Y = [], Z = [1,2]
+;  false.
+EOF
+}
+
 @test "steps go to stderr, not stdout" {
     run --separate-stderr "$ZIPC" "$ROOT/test/concat.pl" "$T/c.bin"
     [ "$status" -eq 0 ]
