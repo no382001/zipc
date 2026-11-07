@@ -133,6 +133,14 @@ EOF
     done
 }
 
+@test "an error writing the image is not a usage error" {
+    seq -f 'p(%g).' 256 > "$T/many.pl"
+    run --separate-stderr "$ZIPC" "$T/many.pl" "$T/many.bin"
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"domain_error(byte,256)"* ]]
+    [[ "$stderr" != *usage:* ]]
+}
+
 @test "-h prints the usage made from the specs" {
     run --separate-stderr "$ZIPC" -h
     [ "$status" -eq 0 ]

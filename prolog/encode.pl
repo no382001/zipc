@@ -27,7 +27,7 @@ u8(N) --> { must_be_byte(N) }, [N].
 
 must_be_byte(X) :-
     (   integer(X), X >= 0, X =< 255 -> true
-    ;   throw(error(domain_error(byte, X), _))
+    ;   throw(error(domain_error(byte, X), must_be_byte/1))
     ).
 
 u16(N) -->

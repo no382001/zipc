@@ -89,9 +89,9 @@ flag_value(F, V) :- ( is_set(F) -> V = true ; V = false ).
 %  Prints Error to stderr; Code is the exit code for it.
 report(usage(Why), 2) :- !,
     usage(U), format(user_error, "~szipc: ~s~n", [U, Why]).
-report(error(existence_error(option, Opt), getopt/3), 2) :- !,
+report(error(existence_error(option, Opt), Ctx), 2) :- Ctx == getopt/3, !,
     usage(U), format(user_error, "~szipc: unknown option ~a~n", [U, Opt]).
-report(error(E, getopt/3), 2) :- !,
+report(error(E, Ctx), 2) :- Ctx == getopt/3, !,
     usage(U), format(user_error, "~szipc: ~q~n", [U, E]).
 report(no_vm(Zip), 1) :- !,
     format(user_error, "zipc: no VM at ~s, run make~n", [Zip]).
