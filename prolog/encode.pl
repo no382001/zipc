@@ -21,7 +21,7 @@ string(Cs) -->
       ;   true
       ),
       length(Bs, N) },
-    u8(N), seq(Bs), [0].
+    u16(N), seq(Bs), [0].
 
 u8(N) --> { must_be_byte(N) }, [N].
 

@@ -17,13 +17,13 @@
 //   term      = IMAGE_TERM_ANY | IMAGE_TERM_NIL | IMAGE_TERM_CONS
 //             | IMAGE_TERM_INTEGER value:i32
 //             | IMAGE_TERM_PROCEDURE procedure_index:u8
-//   string    = length:u8 byte* 0
+//   string    = length:u16 byte* 0
 //
 // A key is any, nil, cons or an integer. An external reference is nil, an
 // integer or a procedure
 
 #define ZIP_IMAGE_MAGIC "ZIP"
-#define ZIP_IMAGE_VERSION 1
+#define ZIP_IMAGE_VERSION 2
 
 typedef enum {
   IMAGE_TERM_ANY = 0,
@@ -59,6 +59,5 @@ typedef struct {
   const char *error;
   size_t error_offset; // bytes read before the error was found
 } zip_image_t;
-
 
 bool zip_load(zip_image_t *image, const uint8_t *bytes, size_t length);

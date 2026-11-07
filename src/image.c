@@ -55,9 +55,9 @@ static bool read_integer(reader_t *r, word_t *value) {
 }
 
 static bool read_string(reader_t *r, const char **string) {
-  uint8_t length;
+  uint16_t length;
   const uint8_t *p;
-  if (!read_u8(r, &length) || !read_bytes(r, (size_t)length + 1, &p))
+  if (!read_u16(r, &length) || !read_bytes(r, (size_t)length + 1, &p))
     return false;
   if (p[length] != 0 || memchr(p, 0, length) != NULL)
     return fail(r, "malformed string");

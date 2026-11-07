@@ -141,6 +141,15 @@ EOF
     [[ "$stderr" != *usage:* ]]
 }
 
+@test "a query longer than 255 bytes runs" {
+    local list
+    list=$(seq -s, 1 100)
+    printf 'p([%s]).\n?- p([%s]).\n' "$list" "$list" > "$T/long.pl"
+    run --separate-stderr "$ZIPC" -r "$T/long.pl"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$(printf -- '?- p([%s]).\n   true.' "$list")" ]
+}
+
 @test "-h prints the usage made from the specs" {
     run --separate-stderr "$ZIPC" -h
     [ "$status" -eq 0 ]
