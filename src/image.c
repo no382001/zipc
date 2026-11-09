@@ -65,6 +65,16 @@ static bool read_string(reader_t *r, const char **string) {
   return true;
 }
 
+static bool read_atom(reader_t *r, word_t *atom) {
+  uint16_t index;
+  if (!read_u16(r, &index))
+    return false;
+  if (index == 0 || index >= r->image->atom_count)
+    return fail(r, "atom index out of range");
+  *atom = MAKE_ATOM(index);
+  return true;
+}
+
 static bool read_key(reader_t *r, word_t *key) {
   uint8_t term;
   if (!read_u8(r, &term))
@@ -81,13 +91,16 @@ static bool read_key(reader_t *r, word_t *key) {
     return true;
   case IMAGE_TERM_INTEGER:
     return read_integer(r, key);
+  case IMAGE_TERM_ATOM:
+    return read_atom(r, key);
   }
   return fail(r, "bad clause key");
 }
 
 static bool read_reference(reader_t *r, zip_external_reference_t *reference,
                            zip_operand_t *kind) {
-  uint8_t term, index;
+  uint8_t term;
+  uint16_t index;
   if (!read_u8(r, &term))
     return false;
   switch (term) {
@@ -98,8 +111,11 @@ static bool read_reference(reader_t *r, zip_external_reference_t *reference,
   case IMAGE_TERM_INTEGER:
     *kind = OPERAND_CONSTANT;
     return read_integer(r, &reference->value);
+  case IMAGE_TERM_ATOM:
+    *kind = OPERAND_CONSTANT;
+    return read_atom(r, &reference->value);
   case IMAGE_TERM_PROCEDURE:
-    if (!read_u8(r, &index))
+    if (!read_u16(r, &index))
       return false;
     if (index >= r->image->procedure_count)
       return fail(r, "procedure index out of range");
@@ -177,9 +193,9 @@ static bool read_code(reader_t *r, zip_clause_t *clause) {
 
 static bool read_procedure(reader_t *r, zip_procedure_t *procedure) {
   zip_image_t *image = r->image;
-  uint8_t clause_count;
+  uint16_t clause_count;
   if (!read_string(r, &procedure->name) || !read_u8(r, &procedure->arity) ||
-      !read_u8(r, &clause_count))
+      !read_u16(r, &clause_count))
     return false;
   // enter_procedure needs a first clause to find the procedure from.
   if (clause_count == 0)
@@ -189,7 +205,7 @@ static bool read_procedure(reader_t *r, zip_procedure_t *procedure) {
 
   zip_clause_t *clauses = &image->clauses[image->clause_count];
   image->clause_count = (uint16_t)(image->clause_count + clause_count);
-  for (uint8_t i = 0; i < clause_count; i++) {
+  for (uint16_t i = 0; i < clause_count; i++) {
     zip_clause_t *c = &clauses[i];
     if (!read_key(r, &c->key) || !read_code(r, c))
       return false;
@@ -214,6 +230,7 @@ static bool read_query(reader_t *r, zip_query_t *query) {
 
 bool zip_load(zip_image_t *image, const uint8_t *bytes, size_t length) {
   reader_t r = {bytes, bytes, bytes + length, image};
+  image->atom_count = 0;
   image->procedure_count = 0;
   image->query_count = 0;
   image->clause_count = 0;
@@ -222,7 +239,8 @@ bool zip_load(zip_image_t *image, const uint8_t *bytes, size_t length) {
   image->error_offset = 0;
 
   const uint8_t *magic;
-  uint8_t version, procedure_count, query_count;
+  uint8_t version;
+  uint16_t atom_count, procedure_count, query_count;
   if (!read_bytes(&r, sizeof ZIP_IMAGE_MAGIC - 1, &magic))
     return false;
   if (memcmp(magic, ZIP_IMAGE_MAGIC, sizeof ZIP_IMAGE_MAGIC - 1) != 0)
@@ -231,7 +249,18 @@ bool zip_load(zip_image_t *image, const uint8_t *bytes, size_t length) {
     return false;
   if (version != ZIP_IMAGE_VERSION)
     return fail(&r, "unsupported image version");
-  if (!read_u8(&r, &procedure_count) || !read_u8(&r, &query_count))
+
+  if (!read_u16(&r, &atom_count))
+    return false;
+  if (atom_count >= ZIP_IMAGE_ATOMS)
+    return fail(&r, "too many atoms");
+  image->atoms[0] = "[]";
+  for (uint16_t i = 1; i <= atom_count; i++)
+    if (!read_string(&r, &image->atoms[i]))
+      return false;
+  image->atom_count = (uint16_t)(atom_count + 1);
+
+  if (!read_u16(&r, &procedure_count) || !read_u16(&r, &query_count))
     return false;
   if (procedure_count > ZIP_IMAGE_PROCEDURES)
     return fail(&r, "too many procedures");
@@ -240,10 +269,10 @@ bool zip_load(zip_image_t *image, const uint8_t *bytes, size_t length) {
 
   // set first so that references to later procedures can be checked.
   image->procedure_count = procedure_count;
-  for (uint8_t i = 0; i < procedure_count; i++)
+  for (uint16_t i = 0; i < procedure_count; i++)
     if (!read_procedure(&r, &image->procedures[i]))
       return false;
-  for (uint8_t i = 0; i < query_count; i++)
+  for (uint16_t i = 0; i < query_count; i++)
     if (!read_query(&r, &image->queries[i]))
       return false;
   if (r.next != r.end)

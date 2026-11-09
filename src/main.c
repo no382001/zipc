@@ -1,5 +1,6 @@
 #include <inttypes.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "image.h"
 
@@ -8,6 +9,63 @@
 static uint8_t image_bytes[IMAGE_BYTES];
 static zip_image_t image;
 static zip_machine_t machine;
+
+static bool is_lower(char c) { return c >= 'a' && c <= 'z'; }
+
+static bool is_alnum(char c) {
+  return is_lower(c) || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+         c == '_';
+}
+
+static bool is_symbol(char c) {
+  return strchr("+-*/\\^<>=~:.?@#&$", c) != NULL;
+}
+
+// Whether writeq/1 writes the atom Name without quotes.
+static bool plain_atom(const char *name) {
+  if (strcmp(name, "[]") == 0 || strcmp(name, "!") == 0 ||
+      strcmp(name, ";") == 0 || strcmp(name, "{}") == 0)
+    return true;
+  if (is_lower(name[0])) {
+    for (const char *p = name + 1; *p != '\0'; p++)
+      if (!is_alnum(*p))
+        return false;
+    return true;
+  }
+  if (name[0] == '\0' || strcmp(name, ".") == 0)
+    return false;
+  for (const char *p = name; *p != '\0'; p++)
+    if (!is_symbol(*p))
+      return false;
+  return true;
+}
+
+static void print_atom(const char *name) {
+  if (plain_atom(name)) {
+    fputs(name, stdout);
+    return;
+  }
+  putchar('\'');
+  for (const char *p = name; *p != '\0'; p++) {
+    switch (*p) {
+    case '\'':
+      fputs("\\'", stdout);
+      break;
+    case '\\':
+      fputs("\\\\", stdout);
+      break;
+    case '\n':
+      fputs("\\n", stdout);
+      break;
+    case '\t':
+      fputs("\\t", stdout);
+      break;
+    default:
+      putchar(*p);
+    }
+  }
+  putchar('\'');
+}
 
 static void print_term(const zip_machine_t *m, word_t t) {
   t = zip_dereference(t);
@@ -19,10 +77,7 @@ static void print_term(const zip_machine_t *m, word_t t) {
     printf("%" PRIdPTR, INTEGER_VALUE(t));
     break;
   case TAG_ATOM:
-    if (t == ATOM_NIL)
-      printf("[]");
-    else
-      printf("'$atom%" PRIuPTR "'", ATOM_INDEX(t));
+    print_atom(image.atoms[ATOM_INDEX(t)]);
     break;
   case TAG_CONS:
     putchar('[');
@@ -111,7 +166,7 @@ int main(int argc, char **argv) {
   }
 
   bool ok = true;
-  for (uint8_t i = 0; i < image.query_count; i++)
+  for (uint16_t i = 0; i < image.query_count; i++)
     if (!run_query(&image.queries[i]))
       ok = false;
   return ok ? 0 : 1;

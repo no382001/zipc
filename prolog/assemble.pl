@@ -28,58 +28,99 @@ image(Procedures, Queries) -->
     { gen:image_magic(Magic),
       gen:image_version(Version),
       pairs_keys(Procedures, Names),
+      image_atoms(Procedures, Queries, Atoms),
+      maplist(\A^Cs^atom_chars(A, Cs), Atoms, AtomNames),
+      length(Atoms, NA),
       length(Procedures, NP),
       length(Queries, NQ) },
-    seq(Magic), [Version], encode:u8(NP), encode:u8(NQ),
-    procedures(Procedures, Names),
-    queries(Queries, Names).
+    seq(Magic), [Version],
+    encode:u16(NA), encode:strings(AtomNames),
+    encode:u16(NP), encode:u16(NQ),
+    procedures(Procedures, Names-Atoms),
+    queries(Queries, Names-Atoms).
+
+%% image_atoms(+Procedures, +Queries, -Atoms) is det.
+%  Atoms are the atoms the keys and constants use, but not [], in the order
+%  they are first used. Atom I of the image is the Ith of them.
+image_atoms(Procedures, Queries, Atoms) :-
+    phrase((procedures_atoms(Procedures), queries_atoms(Queries)), Atoms0),
+    first_occurrences(Atoms0, Atoms).
+
+procedures_atoms([]) --> [].
+procedures_atoms([_-Cs|Ps]) --> clauses_atoms(Cs), procedures_atoms(Ps).
+
+clauses_atoms([]) --> [].
+clauses_atoms([clause(Key, Is)|Cs]) -->
+    ( { Key = atom(A) } -> [A] ; [] ),
+    instructions_atoms(Is),
+    clauses_atoms(Cs).
+
+queries_atoms([]) --> [].
+queries_atoms([query(_, _, Is)|Qs]) --> instructions_atoms(Is), queries_atoms(Qs).
+
+instructions_atoms([]) --> [].
+instructions_atoms([I|Is]) -->
+    ( { I = constant(A), atom(A), A \== [] } -> [A] ; [] ),
+    instructions_atoms(Is).
+
+first_occurrences(Xs, Ys) :- first_occurrences(Xs, [], Ys).
+first_occurrences([], _, []).
+first_occurrences([X|Xs], Seen, Ys) :-
+    (   memberchk(X, Seen) -> Ys = Ys1
+    ;   Ys = [X|Ys1]
+    ),
+    first_occurrences(Xs, [X|Seen], Ys1).
+
+atom_index(A, _-Atoms, I) :- nth1(I, Atoms, A), !.
 
 procedures([], _) --> [].
-procedures([Name/Arity-Clauses|Ps], Names) -->
+
+procedures([Name/Arity-Clauses|Ps], Tables) -->
     { atom_chars(Name, Cs),
       length(Clauses, N) },
-    encode:string(Cs), encode:u8(Arity), encode:u8(N),
-    clauses(Clauses, Names),
-    procedures(Ps, Names).
+    encode:string(Cs), encode:u8(Arity), encode:u16(N),
+    clauses(Clauses, Tables),
+    procedures(Ps, Tables).
 
 clauses([], _) --> [].
-clauses([clause(Key, Instructions)|Cs], Names) -->
-    key(Key),
-    code(Instructions, Names),
-    clauses(Cs, Names).
+clauses([clause(Key, Instructions)|Cs], Tables) -->
+    key(Key, Tables),
+    code(Instructions, Tables),
+    clauses(Cs, Tables).
 
-key(any) --> term(any).
-key(nil) --> term(nil).
-key(cons) --> term(cons).
-key(N) --> { integer(N) }, term(integer), encode:i32(N).
-key(K) -->
-    { \+ memberchk(K, [any, nil, cons]), \+ integer(K),
-      throw(error(domain_error(zip_key, K), key//1)) }.
+key(any, _) --> term(any).
+key(nil, _) --> term(nil).
+key(cons, _) --> term(cons).
+key(N, _) --> { integer(N) }, term(integer), encode:i32(N).
+key(atom(A), Tables) --> { atom_index(A, Tables, I) }, term(atom), encode:u16(I).
+key(K, _) -->
+    { \+ memberchk(K, [any, nil, cons]), \+ integer(K), K \= atom(_),
+      throw(error(domain_error(zip_key, K), key//2)) }.
 
 queries([], _) --> [].
-queries([query(Text, Variables, Instructions)|Qs], Names) -->
+queries([query(Text, Variables, Instructions)|Qs], Tables) -->
     { length(Variables, N) },
     encode:string(Text), encode:u8(N), encode:strings(Variables),
-    code(Instructions, Names),
-    queries(Qs, Names).
+    code(Instructions, Tables),
+    queries(Qs, Tables).
 
 %%%% Code
 
 % The instructions are assembled first because that fills the external
 % reference table, which comes before them in the image.
-code(Instructions, Names) -->
-    { phrase(instructions(Instructions, Names, [], References), Bytes),
+code(Instructions, Tables) -->
+    { phrase(instructions(Instructions, Tables, [], References), Bytes),
       length(References, NR),
       length(Bytes, NB) },
-    encode:u8(NR), references(References, Names),
+    encode:u8(NR), references(References, Tables),
     encode:u16(NB), seq(Bytes).
 
 instructions([], _, References, References) --> [].
-instructions([I|Is], Names, References0, References) -->
-    instruction(I, Names, References0, References1),
-    instructions(Is, Names, References1, References).
+instructions([I|Is], Tables, References0, References) -->
+    instruction(I, Tables, References0, References1),
+    instructions(Is, Tables, References1, References).
 
-instruction(I, Names, References0, References) -->
+instruction(I, Tables, References0, References) -->
     { I =.. [Mnemonic|Operands],
       (   gen:opcode(Mnemonic, Opcode, Kinds) -> true
       ;   throw(error(existence_error(zip_instruction, I), instruction//3))
@@ -89,23 +130,24 @@ instruction(I, Names, References0, References) -->
       ;   throw(error(domain_error(operand_count(Mnemonic, N), I), instruction//3))
       ) },
     [Opcode],
-    operands(Kinds, Operands, Names, References0, References).
+    operands(Kinds, Operands, Tables, References0, References).
 
 operands([], [], _, References, References) --> [].
-operands([K|Ks], [O|Os], Names, References0, References) -->
-    operand(K, O, Names, References0, References1),
-    operands(Ks, Os, Names, References1, References).
+operands([K|Ks], [O|Os], Tables, References0, References) -->
+    operand(K, O, Tables, References0, References1),
+    operands(Ks, Os, Tables, References1, References).
 
 operand(byte, X, _, References, References) --> { encode:must_be_byte(X) }, [X].
 operand(local, X, _, References, References) --> { encode:must_be_byte(X) }, [X].
-operand(procedure, P, Names, References0, References) -->
-    { (   memberchk(P, Names) -> true
+operand(procedure, P, Tables, References0, References) -->
+    { Tables = Names-_,
+      (   memberchk(P, Names) -> true
       ;   throw(error(existence_error(procedure, P), instruction//3))
       ),
       reference_slot(procedure(P), Slot, References0, References) },
     [Slot].
 operand(constant, C, _, References0, References) -->
-    { (   (C == [] ; integer(C)) -> true
+    { (   (atom(C) ; integer(C)) -> true
       ;   throw(error(domain_error(zip_constant, C), instruction//3))
       ),
       reference_slot(constant(C), Slot, References0, References) },
@@ -119,10 +161,11 @@ reference_slot(R, Slot, References0, References) :-
     encode:must_be_byte(Slot).
 
 references([], _) --> [].
-references([R|Rs], Names) --> reference(R, Names), references(Rs, Names).
+references([R|Rs], Tables) --> reference(R, Tables), references(Rs, Tables).
 
-reference(procedure(P), Names) --> { nth0(I, Names, P) }, term(procedure), encode:u8(I).
-reference(constant([]), _) --> term(nil).
+reference(procedure(P), Names-_) --> { nth0(I, Names, P) }, term(procedure), encode:u16(I).
+reference(constant([]), _) --> !, term(nil).
+reference(constant(A), Tables) --> { atom(A), atom_index(A, Tables, I) }, term(atom), encode:u16(I).
 reference(constant(N), _) --> { integer(N) }, term(integer), encode:i32(N).
 
 %%%% Encoding

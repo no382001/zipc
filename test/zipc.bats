@@ -40,6 +40,47 @@ EOF
     cmp "$T/c.bin" "$T/a.bin"
 }
 
+@test "atoms run" {
+    run_program atoms <<'EOF'
+?- colour(red).
+   true.
+?- colour(C).
+   C = red
+;  C = green
+;  C = blue.
+?- colour(purple).
+   false.
+?- colour(1).
+   false.
+?- complement(blue,X).
+   X = orange.
+?- pair(X,Y).
+   X = red, Y = green
+;  X = green, Y = red
+;  X = blue, Y = orange.
+?- first([a,b,c],X).
+   X = a.
+?- first(L,a).
+   L = [a|_G2].
+?- first(['hello world'],X).
+   X = 'hello world'.
+?- first([[]],X).
+   X = [].
+?- first([[]],[]).
+   true.
+EOF
+}
+
+@test "atoms are quoted as writeq quotes them" {
+    cat > "$T/q.pl" <<'EOF'
+q(['A', 'don''t', +, '+a', ;, '', 'a\\b', 'tab\there', !, {}, ',', '|', '.', '..', aB_9, '_x', '1a', 'a\nb']).
+?- q(X).
+EOF
+    run --separate-stderr "$ZIPC" -r "$T/q.pl"
+    [ "$status" -eq 0 ]
+    [ "${lines[1]}" = "   X = ['A','don\\'t',+,'+a',;,'','a\\\\b','tab\\there',!,{},',','|','.',..,aB_9,'_x','1a','a\\nb']." ]
+}
+
 @test "nrev runs" {
     run_program nrev <<'EOF'
 ?- nrev([],R).

@@ -88,6 +88,7 @@ clause_key(Clause, Key) :-
         ;   A == [] -> Key = nil
         ;   A = [_|_] -> Key = cons
         ;   integer(A) -> Key = A
+        ;   atom(A) -> Key = atom(A)
         )
     ).
 
@@ -97,6 +98,9 @@ clause_key(Clause, Key) :-
    Key = cons.
 ?- clause_key(f(3), Key).
    Key = 3.
+% An atom is wrapped, so that p(any) is not keyed like p(X).
+?- clause_key(colour(any), Key).
+   Key = atom(any).
 % A variable first argument matches anything, and so does no argument at all.
 ?- clause_key(f(X), Key).
    Key = any.
@@ -193,6 +197,7 @@ last_flag([_|_], notlast).
 match_arg(V, _)  --> { var(V) }, [firstvar(V)]. % variable inside the structure
 match_arg(L, _) --> { L == [] }, [constnil].
 match_arg(N, _)  --> { integer(N) }, [immed(N)].
+match_arg(A, _)  --> { atom(A), A \== [] }, [constant(A)].
 match_arg(L, Last) -->
     { nonvar(L), L = [H|T] },
     (   { Last == last } -> [lastconslist] ; [conslist] ),

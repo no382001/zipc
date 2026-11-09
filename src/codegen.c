@@ -46,5 +46,6 @@ int main(void) {
   printf("image_term(cons, %" PRIu8 ").\n", (uint8_t)IMAGE_TERM_CONS);
   printf("image_term(integer, %" PRIu8 ").\n", (uint8_t)IMAGE_TERM_INTEGER);
   printf("image_term(procedure, %" PRIu8 ").\n", (uint8_t)IMAGE_TERM_PROCEDURE);
+  printf("image_term(atom, %" PRIu8 ").\n", (uint8_t)IMAGE_TERM_ATOM);
   return 0;
 }
