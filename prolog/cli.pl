@@ -5,7 +5,7 @@
 :- use_module(library(lambda)).
 :- use_module(library(os)).
 :- use_module(library(files)).
-:- use_module(getopt).
+:- use_module(lib/getopt).
 :- use_module(log).
 :- use_module(build).
 
