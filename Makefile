@@ -42,6 +42,14 @@ $(BUILD)/zip: $(SRCS) $(HDRS) | $(BUILD)
 	$(say) CC $@
 	$(Q)$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(SRCS)
 
+# Stacks big enough for trilog's benchmarks, with no GC.
+BENCHFLAGS ?= -DZIP_LOCAL_STACK_WORDS=65536 -DZIP_GLOBAL_STACK_WORDS=1048576 \
+              -DZIP_TRAIL_WORDS=65536
+
+$(BUILD)/zip-bench: $(SRCS) $(HDRS) | $(BUILD)
+	$(say) CC $@
+	$(Q)$(CC) $(CPPFLAGS) $(CFLAGS) $(BENCHFLAGS) -o $@ $(SRCS)
+
 $(BUILD)/zip-san: $(SRCS) $(HDRS) | $(BUILD)
 	$(say) CC $@
 	$(Q)$(CC) $(CPPFLAGS) $(CFLAGS) $(SANFLAGS) -o $@ $(SRCS)

@@ -212,7 +212,8 @@ EOF
 }
 
 @test "an error writing the image is not a usage error" {
-    seq -f 'p(%g).' 256 > "$T/many.pl"
+    # 256 constants in one clause: more than a byte can index
+    echo "p([$(seq -s, 1000 1255)])." > "$T/many.pl"
     run --separate-stderr "$ZIPC" "$T/many.pl" "$T/many.bin"
     [ "$status" -eq 1 ]
     [[ "$stderr" == *"domain_error(byte,256)"* ]]
@@ -355,4 +356,58 @@ EOF
 ?- colour(X),fail.
    false.
 EOF2
+}
+
+@test "arithmetic runs" {
+    run_program arith <<'EOF2'
+?- fib(10,F).
+   F = 55.
+?- range(298,302,L).
+   L = [298,299,300,301,302].
+?- X is 1+2-300.
+   X = -297.
+?- X is-7-1.
+   X = -8.
+?- 3 is 1+2.
+   true.
+?- 4 is 1+2.
+   false.
+?- a is 1.
+   false.
+?- five(X),X>=5,X=<5,X>4,X=:=5,X=\=6.
+   X = 5.
+?- five(X),X>5.
+   false.
+?- count(1).
+   true.
+EOF2
+}
+
+@test "arithmetic on an unbound or non-integer value is an error at run time" {
+    printf 'inc(X, Y) :- Y is X + 1.\n?- inc(X, Y).\n' > "$T/u.pl"
+    run --separate-stderr "$ZIPC" -r "$T/u.pl"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"error: instantiation error"* ]]
+    printf 'inc(X, Y) :- Y is X + 1.\n?- inc(a, Y).\n' > "$T/t.pl"
+    run --separate-stderr "$ZIPC" -r "$T/t.pl"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"error: type error: evaluable"* ]]
+}
+
+@test "unsupported arithmetic is rejected at compile time" {
+    printf 'p(X) :- Y is X * 2, q(Y).\nq(_).\n' > "$T/m.pl"
+    run --separate-stderr "$ZIPC" "$T/m.pl" "$T/m.bin"
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"arithmetic with (*)/2 is not supported yet"* ]]
+    printf 'p(X) :- X is Y + 1.\n' > "$T/v.pl"
+    run --separate-stderr "$ZIPC" "$T/v.pl" "$T/v.bin"
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"a variable in an arithmetic expression has no value yet"* ]]
+}
+
+@test "integers outside 0..255 are constants" {
+    printf 'n(300).\nn(-1).\n?- n(X).\n?- n(300).\n' > "$T/n.pl"
+    run --separate-stderr "$ZIPC" -r "$T/n.pl"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$(printf '?- n(X).\n   X = 300\n;  X = -1.\n?- n(300).\n   true.')" ]
 }

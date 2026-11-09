@@ -54,10 +54,42 @@ query_text(Goal, VNs, Text) :-
     append(Cs, ".", Text).
 
 no_compound(Goals, Term) :-
-    (   goal(Goals, G), G =.. [_|As], member(A, As), compound_in(A, C)
+    (   goal(Goals, G), \+ arithmetic(G), G =.. [_|As], member(A, As), compound_in(A, C)
     ->  throw(error(representation_error(compound_term(C)), Term))
+    ;   goal(Goals, G), arithmetic(G), expressions(G, E), unsupported(E, Bad)
+    ->  throw(error(representation_error(evaluable(Bad)), Term))
     ;   true
     ).
+
+%% arithmetic(+Goal) is semidet.
+%  Goal is an arithmetic built-in, which compiles to instructions, not a call.
+arithmetic(G) :- functor(G, Op, 2), arithmetic_op(Op, _).
+
+arithmetic_op(is, _).
+arithmetic_op(<, lt).
+arithmetic_op(=<, le).
+arithmetic_op(>, gt).
+arithmetic_op(>=, ge).
+arithmetic_op(=:=, eq).
+arithmetic_op(=\=, ne).
+
+% The expressions of an arithmetic goal: the left of is/2 is not one.
+expressions(_ is E, E) :- !.
+expressions(G, E) :- arg(1, G, E) ; arg(2, G, E).
+
+%% unsupported(+E, -Bad) is semidet.
+%  Bad, as Name/Arity, is a part of the expression E the VM cannot evaluate;
+%  it evaluates integers and variables under + and -.
+unsupported(E, Bad) :-
+    nonvar(E), \+ integer(E),
+    (   ( E = A + B ; E = A - B ) -> ( unsupported(A, Bad) ; unsupported(B, Bad) )
+    ;   functor(E, F, N), Bad = F/N
+    ).
+
+?- catch(no_compound((X is Y + 1, X < 300), t), error(E, _), true).
+   true.
+?- catch(no_compound((X is Y * 2), t), error(E, _), true).
+   E = representation_error(evaluable((*)/2)).
 
 goal((A, B), G) :- !, ( goal(A, G) ; goal(B, G) ).
 goal(G, G).
@@ -74,7 +106,9 @@ compound_in(A, C) :-
    E = representation_error(compound_term(f(X))).
 
 compile_or_throw(Goal, Term) :-
-    (   call(Goal) -> true
+    (   catch(Goal, error(instantiation_error, _),
+              throw(error(instantiation_error, Term)))
+    ->  true
     ;   throw(error(domain_error(compilable, Term), compile/2))
     ).
 
@@ -141,6 +175,10 @@ clause_parts(Head, Head, true).
 body(true, _, _, _, FrameSize) --> !, [return(FrameSize)].
 body(!, _, _, _, FrameSize) --> !, [enter(FrameSize), cut, return(FrameSize)]. % TODO: fast path, but fine for now
 body(fail, _, _, _, FrameSize) --> !, [argmode(FrameSize), fail]. % TODO: fast path, but fine for now
+body(G, Singles, Locals, Seen, FrameSize) --> { arithmetic(G) }, !,
+    [enter(FrameSize)],
+    arithmetic(G, Singles, Locals, Seen, _),
+    [return(FrameSize)].
 body((A,B), Singles, Locals, Seen, FrameSize) --> !,
     [enter(FrameSize)],
     goals((A,B), Singles, Locals, Seen, FrameSize).
@@ -156,6 +194,9 @@ goals((!,B), Singles, Locals, Seen, FrameSize) --> !,
     [cut],
     goals(B, Singles, Locals, Seen, FrameSize).
 goals((fail,_), _, _, _, _) --> !, [fail].
+goals((A,B), Singles, Locals, Seen0, FrameSize) --> { arithmetic(A) }, !,
+    arithmetic(A, Singles, Locals, Seen0, Seen),
+    goals(B, Singles, Locals, Seen, FrameSize).
 goals((A,B), Singles, Locals, Seen0, FrameSize) --> !,
     { functor(A, F, N), A =.. [_|Args] },
     goal_args(Args, Singles, Locals, Seen0, Seen),
@@ -163,6 +204,9 @@ goals((A,B), Singles, Locals, Seen0, FrameSize) --> !,
     goals(B, Singles, Locals, Seen, FrameSize).
 goals(!, _, _, _, FrameSize) --> !, [cut, return(FrameSize)].
 goals(fail, _, _, _, _) --> !, [fail].
+goals(A, Singles, Locals, Seen, FrameSize) --> { arithmetic(A) }, !,
+    arithmetic(A, Singles, Locals, Seen, _),
+    [return(FrameSize)].
 goals(A, Singles, Locals, Seen0, _) -->
     { functor(A, F, N), A =.. [_|Args] },
     goal_args(Args, Singles, Locals, Seen0, _),
@@ -217,6 +261,41 @@ goal_args(Args, Singles, Locals, Seen0, Seen) -->
 ?- phrase(body((f, fail, g), [], [], [], 8), Is).
    Is = [enter(8), call(f/0), fail].
 
+%% arithmetic(+Goal, +Singles, +Locals, +Seen0, -Seen)// is det.
+%  Evaluates the expressions of Goal on the VM's arithmetic stack, then
+%  compares them, or for is/2 unifies the left side with the value. A left
+%  side met for the first time takes the value in its slot, and joins Seen.
+arithmetic(X is E, Singles, Locals, Seen0, Seen) --> !,
+    expression(E, Seen0),
+    (   { var(X), var_slot(X, Seen0, Slot) } -> [isvar(Slot)], { Seen = Seen0 }
+    ;   { var(X), member(S, Singles), S == X } -> [isvoid], { Seen = Seen0 }
+    ;   { var(X) } -> { var_slot(X, Locals, Slot) }, [isfirst(Slot)], { Seen = [X-Slot|Seen0] }
+    ;   { integer(X) } -> expression(X, Seen0), [eq], { Seen = Seen0 }
+    ;   [isvoid, fail], { Seen = Seen0 } % not a number: never equal
+    ).
+arithmetic(G, _, _, Seen, Seen) -->
+    { G =.. [Op, A, B], arithmetic_op(Op, I) },
+    expression(A, Seen),
+    expression(B, Seen),
+    [I].
+
+%% expression(+E, +Seen)// is det.
+%  Pushes the value of E. A variable not met yet can have no value, which
+%  would be an instantiation error every time, so it is one now.
+expression(V, Seen) --> { var(V) }, !,
+    (   { var_slot(V, Seen, Slot) } -> [pushvar(Slot)]
+    ;   { throw(error(instantiation_error, expression//2)) }
+    ).
+expression(N, _) --> { integer(N) }, !,
+    ( { N >= 0, N =< 255 } -> [pushimmed(N)] ; [pushconst(N)] ).
+expression(A + B, Seen) --> !, expression(A, Seen), expression(B, Seen), [add].
+expression(A - B, Seen) --> expression(A, Seen), expression(B, Seen), [sub].
+
+?- phrase(body((A is B - 1, A < 300), [], [A-9], [B-8], 10), Is).
+   Is = [enter(10), pushvar(8), pushimmed(1), sub, isfirst(9), pushvar(9), pushconst(300), lt, return(10)].
+?- phrase(body(A =:= B, [], [], [A-8, B-9], 10), Is).
+   Is = [enter(10), pushvar(8), pushvar(9), eq, return(10)].
+
 %% match_args(+Args, +Slot0)// is semidet.
 %  First pass: Argument I lives in slot 8+I-1; a variable that is a whole argument stays there.
 %  Variables come out as argvar(V, Slot) and firstvar(V), for slots//6 to number.
@@ -238,7 +317,7 @@ last_flag([_|_], notlast).
 %  Matches Term inside an argument; Last says whether anything follows it at this level.
 match_arg(V, _)  --> { var(V) }, [firstvar(V)]. % variable inside the structure
 match_arg(L, _) --> { L == [] }, [constnil].
-match_arg(N, _)  --> { integer(N) }, [immed(N)].
+match_arg(N, _)  --> { integer(N) }, ( { N >= 0, N =< 255 } -> [immed(N)] ; [constant(N)] ).
 match_arg(A, _)  --> { atom(A), A \== [] }, [constant(A)].
 match_arg(L, Last) -->
     { nonvar(L), L = [H|T] },
@@ -434,6 +513,8 @@ query_goals(A, Locals, Seen0) -->
 
 query_goal(!, _, Seen, Seen) --> !, [cut].
 query_goal(fail, _, Seen, Seen) --> !, [fail].
+query_goal(G, Locals, Seen0, Seen) --> { arithmetic(G) }, !,
+    arithmetic(G, [], Locals, Seen0, Seen).
 query_goal(Goal, Locals, Seen0, Seen) -->
     { functor(Goal, F, N), Goal =.. [_|Args] },
     goal_args(Args, [], Locals, Seen0, Seen),

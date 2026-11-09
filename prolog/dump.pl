@@ -71,11 +71,24 @@ neck(return(_)).
 
 dump_goals(_, []).
 dump_goals(_, [halt]) :- write('    '), paint(control, write(halt)), nl.
+dump_goals(Names, Is) :- % an arithmetic goal is one line
+    append(Pushes, [End|Is1], Is), maplist(arithmetic_push, Pushes), arithmetic_end(End), !,
+    append(Pushes, [End], Line),
+    dump_line(Names, goal, '', Line),
+    dump_goals(Names, Is1).
 dump_goals(Names, Is) :-
     append(Args, [Call|Is1], Is), goal_end(Call), !,
     dump_line(Names, goal, '', [Call]),
     dump_args(Names, '', Args),
     dump_goals(Names, Is1).
+
+arithmetic_push(pushvar(_)).
+arithmetic_push(pushimmed(_)).
+arithmetic_push(pushconst(_)).
+arithmetic_push(add).
+arithmetic_push(sub).
+
+arithmetic_end(E) :- memberchk(E, [isvar(_), isfirst(_), isvoid, lt, le, gt, ge, eq, ne]).
 
 goal_end(call(_)).
 goal_end(depart(_, _)).
@@ -122,6 +135,9 @@ dump_instruction(Names, Slot, I) :-
 instruction_slot(var(S), _, S).
 instruction_slot(firstvar(S), _, S).
 instruction_slot(skipvar, S, S).
+instruction_slot(pushvar(S), _, S).
+instruction_slot(isvar(S), _, S).
+instruction_slot(isfirst(S), _, S).
 
 % Escapes count as columns in format/2, so each column is formatted on its own.
 dump_columns(Label, Slot) :-

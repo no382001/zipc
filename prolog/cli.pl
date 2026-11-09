@@ -100,5 +100,9 @@ report(error(existence_error(procedures, Undefined), _), 1) :- !,
     maplist(\ (P-From)^format(user_error, "undefined procedure ~w, called by ~s~n", [P, From]), Undefined).
 report(error(representation_error(compound_term(C)), Term), 1) :- !,
     format(user_error, "zipc: compound terms are not supported yet: ~q in ~q~n", [C, Term]).
+report(error(representation_error(evaluable(F)), Term), 1) :- !,
+    format(user_error, "zipc: arithmetic with ~q is not supported yet: in ~q~n", [F, Term]).
+report(error(instantiation_error, Term), 1) :- !,
+    format(user_error, "zipc: a variable in an arithmetic expression has no value yet: in ~q~n", [Term]).
 report(E, 1) :-
     format(user_error, "zipc: ~q~n", [E]).

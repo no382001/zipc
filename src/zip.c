@@ -28,6 +28,20 @@ const zip_opcode_info_t zip_opcodes[] = {
     {OPCODE_CONSLIST, "conslist", 0, {0}},
     {OPCODE_LASTCONSLIST, "lastconslist", 0, {0}},
     {OPCODE_CONSTNIL, "constnil", 0, {0}},
+    {OPCODE_PUSHVAR, "pushvar", 1, {OPERAND_LOCAL}},
+    {OPCODE_PUSHIMMED, "pushimmed", 1, {OPERAND_BYTE}},
+    {OPCODE_PUSHCONST, "pushconst", 1, {OPERAND_CONSTANT}},
+    {OPCODE_ADD, "add", 0, {0}},
+    {OPCODE_SUB, "sub", 0, {0}},
+    {OPCODE_ISVAR, "isvar", 1, {OPERAND_LOCAL}},
+    {OPCODE_ISFIRST, "isfirst", 1, {OPERAND_LOCAL}},
+    {OPCODE_ISVOID, "isvoid", 0, {0}},
+    {OPCODE_LT, "lt", 0, {0}},
+    {OPCODE_LE, "le", 0, {0}},
+    {OPCODE_GT, "gt", 0, {0}},
+    {OPCODE_GE, "ge", 0, {0}},
+    {OPCODE_EQ, "eq", 0, {0}},
+    {OPCODE_NE, "ne", 0, {0}},
     {OPCODE_HALT, "halt", 0, {0}},
 };
 
@@ -228,7 +242,19 @@ word_t zip_query_variable(const zip_machine_t *m, uint8_t slot) {
   return m->local_stack[slot];
 }
 
+// Tags r as an integer word; false, with m->error set, if it does not fit.
+static bool make_integer(zip_machine_t *m, intptr_t r, word_t *w) {
+  *w = MAKE_INTEGER(r);
+  if (INTEGER_VALUE(*w) != r) {
+    m->error = "integer overflow";
+    return false;
+  }
+  return true;
+}
+
 zip_status_t zip_run(zip_machine_t *m) {
+  intptr_t stack[ZIP_ARITHMETIC_DEPTH];
+  int sp = 0;
   for (;;) {
     uint8_t opcode = *m->program_counter++;
     word_t c;
@@ -421,6 +447,87 @@ zip_status_t zip_run(zip_machine_t *m) {
       }
 
       ANY_MODE(OPCODE_FAIL) : goto fail;
+
+      ANY_MODE(OPCODE_PUSHVAR) : {
+        word_t w = zip_dereference(m->current_frame[*m->program_counter++]);
+        if (TAG(w) != TAG_INTEGER) {
+          m->error = TAG(w) == TAG_REFERENCE ? "instantiation error"
+                                             : "type error: evaluable";
+          return ZIP_ERROR;
+        }
+        c = (word_t)INTEGER_VALUE(w);
+        goto push;
+      }
+      ANY_MODE(OPCODE_PUSHIMMED) : c = *m->program_counter++;
+      goto push;
+      ANY_MODE(OPCODE_PUSHCONST)
+          : c = (word_t)INTEGER_VALUE(
+                m->clause->external_references[*m->program_counter++].value);
+    push:
+      if (sp == ZIP_ARITHMETIC_DEPTH) {
+        m->error = "arithmetic stack overflow";
+        return ZIP_ERROR;
+      }
+      stack[sp++] = (intptr_t)c;
+      break;
+
+      ANY_MODE(OPCODE_ADD) : ANY_MODE(OPCODE_SUB) : {
+        intptr_t r;
+        bool overflow =
+            opcode == OPCODE_ADD
+                ? __builtin_add_overflow(stack[sp - 2], stack[sp - 1], &r)
+                : __builtin_sub_overflow(stack[sp - 2], stack[sp - 1], &r);
+        if (overflow) {
+          m->error = "integer overflow";
+          return ZIP_ERROR;
+        }
+        stack[--sp - 1] = r;
+        break;
+      }
+
+      ANY_MODE(OPCODE_ISVAR) : {
+        if (!make_integer(m, stack[--sp], &c))
+          return ZIP_ERROR;
+        if (!unify(m, m->current_frame[*m->program_counter++], c))
+          goto fail;
+        break;
+      }
+      ANY_MODE(OPCODE_ISFIRST)
+          : if (!make_integer(m, stack[--sp], &c)) return ZIP_ERROR;
+      m->current_frame[*m->program_counter++] = c;
+      break;
+      ANY_MODE(OPCODE_ISVOID) : sp--;
+      break;
+
+      ANY_MODE(OPCODE_LT) : ANY_MODE(OPCODE_LE) : ANY_MODE(OPCODE_GT)
+          : ANY_MODE(OPCODE_GE) : ANY_MODE(OPCODE_EQ) : ANY_MODE(OPCODE_NE) : {
+        intptr_t a = stack[sp - 2], b = stack[sp - 1];
+        sp -= 2;
+        bool holds;
+        switch (opcode) {
+        case OPCODE_LT:
+          holds = a < b;
+          break;
+        case OPCODE_LE:
+          holds = a <= b;
+          break;
+        case OPCODE_GT:
+          holds = a > b;
+          break;
+        case OPCODE_GE:
+          holds = a >= b;
+          break;
+        case OPCODE_EQ:
+          holds = a == b;
+          break;
+        default:
+          holds = a != b;
+          break;
+        }
+        if (!holds)
+          goto fail;
+        break;
+      }
 
       // Between goals, after a neck: the next goal's frame may now go lower.
       ANY_MODE(OPCODE_CUT)

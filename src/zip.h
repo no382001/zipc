@@ -45,6 +45,20 @@ typedef enum {
   OPCODE_LASTCONSLIST =
       34, // unify the last functor '.' of arity 2 in a nested term
   OPCODE_CONSTNIL = 35, // unify the constant '[]'
+  OPCODE_PUSHVAR = 40,   // push the value of a local
+  OPCODE_PUSHIMMED = 41, // push a small integer
+  OPCODE_PUSHCONST = 42, // push an integer constant
+  OPCODE_ADD = 43,
+  OPCODE_SUB = 44,
+  OPCODE_ISVAR = 45,   // pop, and unify with a local
+  OPCODE_ISFIRST = 46, // pop into a local met for the first time
+  OPCODE_ISVOID = 47,  // pop, and drop it
+  OPCODE_LT = 48,      // pop two, and fail unless the first is less
+  OPCODE_LE = 49,
+  OPCODE_GT = 50,
+  OPCODE_GE = 51,
+  OPCODE_EQ = 52,
+  OPCODE_NE = 53,
   OPCODE_HALT = 63,     // not ZIP: return control to the host
 } zip_opcode_t;
 
@@ -113,10 +127,17 @@ typedef struct {
   word_t *data;
 } zip_context_t;
 
+#ifndef ZIP_LOCAL_STACK_WORDS
 #define ZIP_LOCAL_STACK_WORDS 4096
+#endif
+#ifndef ZIP_GLOBAL_STACK_WORDS
 #define ZIP_GLOBAL_STACK_WORDS 16384
+#endif
+#ifndef ZIP_TRAIL_WORDS
 #define ZIP_TRAIL_WORDS 4096
+#endif
 #define ZIP_SCRATCHPAD_DEPTH 256
+#define ZIP_ARITHMETIC_DEPTH 64
 
 typedef struct {
   const uint8_t *program_counter; // [PC]
