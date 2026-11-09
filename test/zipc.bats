@@ -318,3 +318,11 @@ EOF
     [ "$status" -eq 1 ]
     [[ "$output" == *"undefined procedure g/0, called by ?- g."* ]]
 }
+
+@test "compound terms other than lists are rejected by name" {
+    printf 'p([1,2]).\nq(X) :- p([X,f(X)]).\n' > "$T/c.pl"
+    run --separate-stderr "$ZIPC" "$T/c.pl" "$T/c.bin"
+    [ "$status" -eq 1 ]
+    [[ "$stderr" == *"compound terms are not supported yet: f(A) in q(A):-p([A,f(A)])"* ]]
+    [ ! -e "$T/c.bin" ]
+}

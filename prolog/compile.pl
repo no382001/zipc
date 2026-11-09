@@ -34,6 +34,8 @@ include(Goal, [L|Ls0], Ls) :-
 %  Pair is Func/Arity-clause(Key, Instrs), ready to group into procedures.
 %  Throws on a clause the compiler does not handle yet.
 compile_clause(Clause, P-clause(Key, Instrs)) :-
+    clause_parts(Clause, Head, Body),
+    no_compound((Head, Body), Clause),
     compile_or_throw(compile_procedure(Clause, procedure(P, Instrs)), Clause),
     clause_key(Clause, Key).
 
@@ -42,6 +44,7 @@ compile_clause(Clause, P-clause(Key, Instrs)) :-
 %  as read from a ?- Goal directive. Throws on a goal it does not handle yet.
 compile_goal(Goal-VNs, Q) :-
     query_text(Goal, VNs, Text),
+    no_compound(Goal, Goal),
     compile_or_throw(compile_query(Text, Q), Goal).
 
 %% query_text(+Goal, +VNs, -Text) is det.
@@ -49,6 +52,26 @@ compile_goal(Goal-VNs, Q) :-
 query_text(Goal, VNs, Text) :-
     write_term_to_chars(Goal, [quoted(true), variable_names(VNs)], Cs),
     append(Cs, ".", Text).
+
+no_compound(Goals, Term) :-
+    (   goal(Goals, G), G =.. [_|As], member(A, As), compound_in(A, C)
+    ->  throw(error(representation_error(compound_term(C)), Term))
+    ;   true
+    ).
+
+goal((A, B), G) :- !, ( goal(A, G) ; goal(B, G) ).
+goal(G, G).
+
+compound_in(A, C) :-
+    compound(A),
+    (   A = [H|T] -> ( compound_in(H, C) ; compound_in(T, C) )
+    ;   C = A
+    ).
+
+?- no_compound((p([1,X]), q(a)), t).
+   true.
+?- catch(no_compound((p(X), q([a,f(X)])), t), error(E, _), true).
+   E = representation_error(compound_term(f(X))).
 
 compile_or_throw(Goal, Term) :-
     (   call(Goal) -> true

@@ -1,15 +1,3 @@
-% phase 1: bodies with several goals
-
-concatenate([], L, L).
-concatenate([X|L1], L2, [X|L3]) :- concatenate(L1, L2, L3).
-
-nrev([], []).
-nrev([H|T], R) :- nrev(T, RT), concatenate(RT, [H], R).
-
-?- nrev([], R).             % R = []
-?- nrev([1,2,3], R).        % R = [3,2,1]
-?- nrev([1,2], [1,2]).      % false
-
 % phase 2: atoms and structures
 
 solve(true).
