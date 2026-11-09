@@ -139,23 +139,31 @@ clause_parts(Head, Head, true).
 %  A fact returns; a single goal pushes its arguments and jumps to it;
 %  several goals call all but the last, which departs.
 body(true, _, _, _, FrameSize) --> !, [return(FrameSize)].
+body(!, _, _, _, FrameSize) --> !, [enter(FrameSize), cut, return(FrameSize)]. % TODO: fast path, but fine for now
+body(fail, _, _, _, FrameSize) --> !, [argmode(FrameSize), fail]. % TODO: fast path, but fine for now
 body((A,B), Singles, Locals, Seen, FrameSize) --> !,
     [enter(FrameSize)],
-    goals((A,B), Singles, Locals, Seen).
+    goals((A,B), Singles, Locals, Seen, FrameSize).
 body(Goal, Singles, Locals, Seen, FrameSize) -->
     { functor(Goal, F, N), Goal =.. [_|Args] },
     [argmode(FrameSize)],
     goal_args(Args, Singles, Locals, Seen, _),
     [proceed(F/N, N)].
 
-%% goals(+Goals, +Singles, +Locals, +Seen)// is semidet.
+%% goals(+Goals, +Singles, +Locals, +Seen, +FrameSize)// is semidet.
 %  Each goal pushes its arguments; all but the last are called, the last departs.
-goals((A,B), Singles, Locals, Seen0) --> !,
+goals((!,B), Singles, Locals, Seen, FrameSize) --> !,
+    [cut],
+    goals(B, Singles, Locals, Seen, FrameSize).
+goals((fail,_), _, _, _, _) --> !, [fail].
+goals((A,B), Singles, Locals, Seen0, FrameSize) --> !,
     { functor(A, F, N), A =.. [_|Args] },
     goal_args(Args, Singles, Locals, Seen0, Seen),
     [call(F/N)],
-    goals(B, Singles, Locals, Seen).
-goals(A, Singles, Locals, Seen0) -->
+    goals(B, Singles, Locals, Seen, FrameSize).
+goals(!, _, _, _, FrameSize) --> !, [cut, return(FrameSize)].
+goals(fail, _, _, _, _) --> !, [fail].
+goals(A, Singles, Locals, Seen0, _) -->
     { functor(A, F, N), A =.. [_|Args] },
     goal_args(Args, Singles, Locals, Seen0, _),
     [depart(F/N, N)].
@@ -197,6 +205,17 @@ goal_args(Args, Singles, Locals, Seen0, Seen) -->
 % A variable first met in one goal is a var in the next.
 ?- phrase(body((f(C), g(C)), [], [C-9], [], 10), Is).
    Is = [enter(10), firstvar(9), call(f/1), var(9), depart(g/1, 1)].
+
+?- phrase(body((f, !, g), [], [], [], 8), Is).
+   Is = [enter(8), call(f/0), cut, depart(g/0, 0)].
+?- phrase(body((f, !), [], [], [], 8), Is).
+   Is = [enter(8), call(f/0), cut, return(8)].
+?- phrase(body(!, [], [], [], 8), Is).
+   Is = [enter(8), cut, return(8)].
+
+% Nothing after a fail runs, so it is not compiled.
+?- phrase(body((f, fail, g), [], [], [], 8), Is).
+   Is = [enter(8), call(f/0), fail].
 
 %% match_args(+Args, +Slot0)// is semidet.
 %  First pass: Argument I lives in slot 8+I-1; a variable that is a whole argument stays there.
@@ -413,6 +432,8 @@ query_goals((A,B), Locals, Seen0) --> !,
 query_goals(A, Locals, Seen0) -->
     query_goal(A, Locals, Seen0, _).
 
+query_goal(!, _, Seen, Seen) --> !, [cut].
+query_goal(fail, _, Seen, Seen) --> !, [fail].
 query_goal(Goal, Locals, Seen0, Seen) -->
     { functor(Goal, F, N), Goal =.. [_|Args] },
     goal_args(Args, [], Locals, Seen0, Seen),

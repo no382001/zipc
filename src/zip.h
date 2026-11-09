@@ -39,6 +39,7 @@ typedef enum {
   OPCODE_CALL = 17,     // call a goal
   OPCODE_PROCEED = 18,  // call the only goal in a clause
   OPCODE_FAIL = 19,     // compiled fail
+  OPCODE_CUT = 20,      // remove the choice points made since the call
   OPCODE_IMMED = 27,    // unify constant small integer
   OPCODE_CONSLIST = 33, // unify the functor '.' of arity 2
   OPCODE_LASTCONSLIST =

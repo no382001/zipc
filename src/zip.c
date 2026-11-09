@@ -23,6 +23,7 @@ const zip_opcode_info_t zip_opcodes[] = {
     {OPCODE_CALL, "call", 1, {OPERAND_PROCEDURE}},
     {OPCODE_PROCEED, "proceed", 2, {OPERAND_PROCEDURE, OPERAND_BYTE}},
     {OPCODE_FAIL, "fail", 0, {0}},
+    {OPCODE_CUT, "cut", 0, {0}},
     {OPCODE_IMMED, "immed", 1, {OPERAND_BYTE}},
     {OPCODE_CONSLIST, "conslist", 0, {0}},
     {OPCODE_LASTCONSLIST, "lastconslist", 0, {0}},
@@ -153,11 +154,12 @@ static bool enter_procedure(zip_machine_t *m, word_t *f,
   if (c == NULL)
     return false;
 
+  // This is also the choice point a cut in this frame goes back to.
+  f[FRAME_PREVIOUS_CHOICE] = (word_t)m->backtrack_frame;
   const zip_clause_t *alternative = next_match(c->next, argument);
   if (alternative != NULL) {
     f[FRAME_ALTERNATIVE] = (word_t)alternative;
     f[FRAME_GLOBAL_MARK] = (word_t)m->global_top;
-    f[FRAME_PREVIOUS_CHOICE] = (word_t)m->backtrack_frame;
     f[FRAME_TRAIL_MARK] = (word_t)m->trail_top;
     m->backtrack_frame = f;
   }
@@ -206,6 +208,7 @@ void zip_initialize(zip_machine_t *m, const zip_clause_t *query) {
   f[FRAME_SIZE] = FRAME_ARGUMENTS;
   f[FRAME_CONTINUATION] = 0;
   f[FRAME_CONTINUATION_FRAME] = 0;
+  f[FRAME_PREVIOUS_CHOICE] = 0;
   f[FRAME_CLAUSE] = (word_t)query;
 
   m->program_counter = query->code;
@@ -418,6 +421,12 @@ zip_status_t zip_run(zip_machine_t *m) {
       }
 
       ANY_MODE(OPCODE_FAIL) : goto fail;
+
+      // Between goals, after a neck: the next goal's frame may now go lower.
+      ANY_MODE(OPCODE_CUT)
+          : m->backtrack_frame =
+                (word_t *)m->current_frame[FRAME_PREVIOUS_CHOICE];
+      goto body;
 
       ANY_MODE(OPCODE_HALT) : return ZIP_HALT;
 

@@ -326,3 +326,33 @@ EOF
     [[ "$stderr" == *"compound terms are not supported yet: f(A) in q(A):-p([A,f(A)])"* ]]
     [ ! -e "$T/c.bin" ]
 }
+
+@test "cut and fail run" {
+    run_program cut <<'EOF2'
+?- first(X).
+   X = red.
+?- t(X).
+   X = 1.
+?- t(2).
+   true.
+?- p(X,Y).
+   X = red, Y = red
+;  X = red, Y = green
+;  X = red, Y = blue.
+?- q(X).
+   X = red
+;  X = yellow.
+?- nope(red).
+   false.
+?- nope(1).
+   true.
+?- c.
+   true.
+?- f.
+   false.
+?- colour(X),!.
+   X = red.
+?- colour(X),fail.
+   false.
+EOF2
+}

@@ -80,6 +80,9 @@ dump_goals(Names, Is) :-
 goal_end(call(_)).
 goal_end(depart(_, _)).
 goal_end(proceed(_, _)).
+goal_end(return(_)).
+goal_end(cut).
+goal_end(fail).
 
 %% dump_args(+Names, +Label, +Instrs) is det.
 %  Prints Instrs an argument a line, numbered by the slot they unify with.
@@ -150,7 +153,7 @@ style(structure, [purple]).
 style(instruction(I), Attrs) :-
     functor(I, Name, _), instruction_style(Name, Style), style(Style, Attrs).
 
-instruction_style(Name, control) :- memberchk(Name, [argmode, enter, return, call, depart, proceed, halt]), !.
+instruction_style(Name, control) :- memberchk(Name, [argmode, enter, return, call, depart, proceed, cut, fail, halt]), !.
 instruction_style(Name, structure) :- memberchk(Name, [conslist, lastconslist, pop]).
 
 %% sgr(?Attr, ?Code) is nondet.
