@@ -97,6 +97,19 @@ static bool bind(zip_machine_t *m, word_t *variable, word_t value) {
   return true;
 }
 
+// After a cut, drops the trail entries made since the newest remaining choice
+// point for variables no older than it
+static void tidy_trail(zip_machine_t *m) {
+  word_t **from = m->backtrack_frame != NULL
+                      ? (word_t **)m->backtrack_frame[FRAME_TRAIL_MARK]
+                      : m->trail;
+  word_t **to = from;
+  for (word_t **p = from; p < m->trail_top; p++)
+    if (older_than_choice(m, *p))
+      *to++ = *p;
+  m->trail_top = to;
+}
+
 // returns true on success, false on failure or error
 static bool unify(zip_machine_t *m, word_t a, word_t b) {
   word_t pending[2 * UNIFY_DEPTH]; // TODO move this to ctx
@@ -647,10 +660,14 @@ zip_status_t zip_run(zip_machine_t *m) {
       }
 
       // Between goals, after a neck: the next goal's frame may now go lower.
-      ANY_MODE(OPCODE_CUT)
-          : m->backtrack_frame =
-                (word_t *)m->current_frame[FRAME_PREVIOUS_CHOICE];
-      goto body;
+      ANY_MODE(OPCODE_CUT) : {
+        word_t *b = (word_t *)m->current_frame[FRAME_PREVIOUS_CHOICE];
+        if (b != m->backtrack_frame) {
+          m->backtrack_frame = b;
+          tidy_trail(m);
+        }
+        goto body;
+      }
 
       ANY_MODE(OPCODE_HALT) : return ZIP_HALT;
 

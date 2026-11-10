@@ -470,3 +470,13 @@ EOF2
    X = 2, Y = 2.
 EOF
 }
+
+@test "a cut tidies the trail, but keeps what an older choice point undoes" {
+    run_program trail <<'EOF'
+?- fib(21,F).
+   F = 10946.
+?- c(X),k(X,Y).
+   X = 1, Y = 1
+;  X = 2, Y = 2.
+EOF
+}
