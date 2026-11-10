@@ -18,14 +18,15 @@
 //             | IMAGE_TERM_INTEGER value:i32
 //             | IMAGE_TERM_PROCEDURE procedure_index:u16
 //             | IMAGE_TERM_ATOM atom_index:u16
+//             | IMAGE_TERM_FUNCTOR atom_index:u16 arity:u8
 //   string    = length:u16 byte* 0
 //
 // The names are those of atoms 1, 2, ...; atom 0 is [], and has no name in
-// the image. A key is any, nil, cons, an integer or an atom. An external
-// reference is nil, an integer, an atom or a procedure.
+// the image. A key is any, nil, cons, an integer, an atom or a functor. An
+// external reference is nil, an integer, an atom, a functor or a procedure.
 
 #define ZIP_IMAGE_MAGIC "ZIP"
-#define ZIP_IMAGE_VERSION 3
+#define ZIP_IMAGE_VERSION 4
 
 typedef enum {
   IMAGE_TERM_ANY = 0,
@@ -34,6 +35,7 @@ typedef enum {
   IMAGE_TERM_INTEGER = 3,
   IMAGE_TERM_PROCEDURE = 4,
   IMAGE_TERM_ATOM = 5,
+  IMAGE_TERM_FUNCTOR = 6,
 } zip_image_term_t;
 
 #define ZIP_IMAGE_PROCEDURES 64

@@ -320,12 +320,49 @@ EOF
     [[ "$output" == *"undefined procedure g/0, called by ?- g."* ]]
 }
 
-@test "compound terms other than lists are rejected by name" {
-    printf 'p([1,2]).\nq(X) :- p([X,f(X)]).\n' > "$T/c.pl"
+@test "control constructs are rejected by name" {
+    printf 'p(1).\nq(X) :- ( p(X) ; X = 2 ).\n' > "$T/c.pl"
     run --separate-stderr "$ZIPC" "$T/c.pl" "$T/c.bin"
     [ "$status" -eq 1 ]
-    [[ "$stderr" == *"compound terms are not supported yet: f(A) in q(A):-p([A,f(A)])"* ]]
+    [[ "$stderr" == *"(;)/2 is not supported yet: in q(A):-p(A);A=2"* ]]
     [ ! -e "$T/c.bin" ]
+}
+
+@test "structures run" {
+    run_program struct <<'EOF'
+?- point(P).
+   P = p(1,2)
+;  P = p(3,4).
+?- point(p(3,Y)).
+   Y = 4.
+?- point(p(5,A)).
+   false.
+?- x(p(7,8),X).
+   X = 7.
+?- shape(circle(C,R)).
+   C = p(0,0), R = 5.
+?- shape(S),area(S,A).
+   S = circle(p(0,0),5), A = 15
+;  S = square(p(1,1),2), A = 4.
+?- same(f(X,b),f(a,Y)).
+   X = a, Y = b.
+?- same(f(X),g(X)).
+   false.
+?- same(f(a),[a]).
+   false.
+?- same([f(X)|T],[f(1),g(2)]).
+   X = 1, T = [g(2)].
+?- same(X,f(Y)),same(Y,'hello world'(g)).
+   X = f('hello world'(g)), Y = 'hello world'(g).
+?- solve(app(X,Y,[1,2])).
+   X = [], Y = [1,2]
+;  X = [1], Y = [2]
+;  X = [1,2], Y = []
+;  false.
+?- solve(nrev([1,2,3],R)).
+   R = [3,2,1]
+;  false.
+EOF
 }
 
 @test "cut and fail run" {

@@ -15,6 +15,8 @@ const zip_opcode_info_t zip_opcodes[] = {
     {OPCODE_FIRSTVAR, "firstvar", 1, {OPERAND_LOCAL}},
     {OPCODE_POP, "pop", 0, {0}},
     {OPCODE_SKIPVAR, "skipvar", 0, {0}},
+    {OPCODE_FUNCTOR, "functor", 2, {OPERAND_FUNCTOR, OPERAND_BYTE}},
+    {OPCODE_LASTFUNCTOR, "lastfunctor", 2, {OPERAND_FUNCTOR, OPERAND_BYTE}},
     {OPCODE_CONSTANT, "constant", 1, {OPERAND_CONSTANT}},
     {OPCODE_ENTER, "enter", 1, {OPERAND_BYTE}},
     {OPCODE_RETURN, "return", 1, {OPERAND_BYTE}},
@@ -107,15 +109,27 @@ static bool unify(zip_machine_t *m, word_t a, word_t b) {
       } else if (TAG(b) == TAG_REFERENCE) {
         if (!bind(m, POINTER(b), a))
           return false;
-      } else if (TAG(a) == TAG_CONS && TAG(b) == TAG_CONS) {
-        if (n == 2 * UNIFY_DEPTH) {
+      } else if (TAG(a) == TAG_COMPOUND && TAG(b) == TAG_COMPOUND) {
+        // a cons cell is a head and a tail, a structure a functor and its
+        // arguments; the functors are compared like any other word.
+        word_t *pa = POINTER(a), *pb = POINTER(b);
+        size_t first = 0, size = 2;
+        if (IS_FUNCTOR(pa[0]) || IS_FUNCTOR(pb[0])) {
+          if (pa[0] != pb[0])
+            return false;
+          first = 1;
+          size = FUNCTOR_ARITY(pa[0]) + 1;
+        }
+        if (2 * (size - first - 1) > 2 * UNIFY_DEPTH - n) {
           m->error = "unify: term nested too deeply";
           return false;
         }
-        pending[n++] = POINTER(a)[1];
-        pending[n++] = POINTER(b)[1];
-        a = POINTER(a)[0];
-        b = POINTER(b)[0];
+        for (size_t i = size - 1; i > first; i--) {
+          pending[n++] = pa[i];
+          pending[n++] = pb[i];
+        }
+        a = pa[first];
+        b = pb[first];
         continue;
       } else {
         return false;
@@ -142,8 +156,8 @@ static bool push_context(zip_machine_t *m) {
 static bool key_matches(word_t key, word_t argument) {
   if (key == KEY_ANY || TAG(argument) == TAG_REFERENCE)
     return true;
-  if (TAG(argument) == TAG_CONS)
-    return key == KEY_CONS;
+  if (TAG(argument) == TAG_COMPOUND)
+    return key == (IS_STRUCTURE(argument) ? POINTER(argument)[0] : KEY_CONS);
   return key == argument;
 }
 
@@ -346,13 +360,13 @@ zip_status_t zip_run(zip_machine_t *m) {
       push = false;
     match_cons: {
       word_t t = zip_dereference(*m->data);
-      if (TAG(t) == TAG_CONS) {
+      if (TAG(t) == TAG_COMPOUND && !IS_STRUCTURE(t)) {
         if (push && !push_context(m))
           goto fail;
         m->data = POINTER(t);
       } else if (TAG(t) == TAG_REFERENCE) {
         word_t *p = new_global(m, 2);
-        if (p == NULL || !bind(m, POINTER(t), MAKE_CONS(p)))
+        if (p == NULL || !bind(m, POINTER(t), MAKE_COMPOUND(p)))
           goto fail;
         if (push && !push_context(m))
           goto fail;
@@ -361,6 +375,55 @@ zip_status_t zip_run(zip_machine_t *m) {
       } else {
         goto fail;
       }
+      break;
+    }
+
+    case DISPATCH(MODE_MATCH, OPCODE_FUNCTOR):
+      push = true;
+      goto match_structure;
+    case DISPATCH(MODE_MATCH, OPCODE_LASTFUNCTOR):
+      push = false;
+    match_structure: {
+      c = m->clause->external_references[*m->program_counter++].value;
+      uint8_t arity = *m->program_counter++;
+      word_t t = zip_dereference(*m->data);
+      if (TAG(t) == TAG_COMPOUND && POINTER(t)[0] == c) {
+        if (push && !push_context(m))
+          goto fail;
+        m->data = POINTER(t) + 1;
+      } else if (TAG(t) == TAG_REFERENCE) {
+        word_t *p = new_global(m, (size_t)arity + 1);
+        if (p == NULL || !bind(m, POINTER(t), MAKE_COMPOUND(p)))
+          goto fail;
+        if (push && !push_context(m))
+          goto fail;
+        p[0] = c;
+        m->data = p + 1;
+        m->mode = MODE_COPY;
+      } else {
+        goto fail;
+      }
+      break;
+    }
+    case DISPATCH(MODE_COPY, OPCODE_FUNCTOR):
+    case DISPATCH(MODE_ARGUMENT, OPCODE_FUNCTOR):
+      push = true;
+      goto build_structure;
+    case DISPATCH(MODE_COPY, OPCODE_LASTFUNCTOR):
+    case DISPATCH(MODE_ARGUMENT, OPCODE_LASTFUNCTOR):
+      push = false;
+    build_structure: {
+      c = m->clause->external_references[*m->program_counter++].value;
+      uint8_t arity = *m->program_counter++;
+      word_t *p = new_global(m, (size_t)arity + 1);
+      if (p == NULL)
+        goto fail;
+      p[0] = c;
+      *m->data = MAKE_COMPOUND(p);
+      if (push && !push_context(m))
+        goto fail;
+      m->data = p + 1;
+      m->mode = MODE_COPY;
       break;
     }
     case DISPATCH(MODE_COPY, OPCODE_CONSLIST):
@@ -374,7 +437,7 @@ zip_status_t zip_run(zip_machine_t *m) {
       word_t *p = new_global(m, 2);
       if (p == NULL)
         goto fail;
-      *m->data = MAKE_CONS(p);
+      *m->data = MAKE_COMPOUND(p);
       if (push && !push_context(m))
         goto fail;
       m->data = p;

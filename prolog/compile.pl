@@ -35,7 +35,7 @@ include(Goal, [L|Ls0], Ls) :-
 %  Throws on a clause the compiler does not handle yet.
 compile_clause(Clause, P-clause(Key, Instrs)) :-
     clause_parts(Clause, Head, Body),
-    no_compound((Head, Body), Clause),
+    supported((Head, Body), Clause),
     compile_or_throw(compile_procedure(Clause, procedure(P, Instrs)), Clause),
     clause_key(Clause, Key).
 
@@ -44,7 +44,7 @@ compile_clause(Clause, P-clause(Key, Instrs)) :-
 %  as read from a ?- Goal directive. Throws on a goal it does not handle yet.
 compile_goal(Goal-VNs, Q) :-
     query_text(Goal, VNs, Text),
-    no_compound(Goal, Goal),
+    supported(Goal, Goal),
     compile_or_throw(compile_query(Text, Q), Goal).
 
 %% query_text(+Goal, +VNs, -Text) is det.
@@ -53,9 +53,12 @@ query_text(Goal, VNs, Text) :-
     write_term_to_chars(Goal, [quoted(true), variable_names(VNs)], Cs),
     append(Cs, ".", Text).
 
-no_compound(Goals, Term) :-
-    (   goal(Goals, G), \+ arithmetic(G), G =.. [_|As], member(A, As), compound_in(A, C)
-    ->  throw(error(representation_error(compound_term(C)), Term))
+%% supported(+Goals, +Term) is det.
+%  Throws, naming Term, if one of Goals is a control construct the compiler
+%  does not handle yet, or evaluates what the VM cannot.
+supported(Goals, Term) :-
+    (   goal(Goals, G), callable(G), functor(G, F, N), control(F/N)
+    ->  throw(error(representation_error(control_construct(F/N)), Term))
     ;   goal(Goals, G), arithmetic(G), expressions(G, E), unsupported(E, Bad)
     ->  throw(error(representation_error(evaluable(Bad)), Term))
     ;   true
@@ -86,24 +89,22 @@ unsupported(E, Bad) :-
     ;   functor(E, F, N), Bad = F/N
     ).
 
-?- catch(no_compound((X is Y + 1, X < 300), t), error(E, _), true).
+control((;)/2).
+control((->)/2).
+control((\+)/1).
+control(call/_).
+
+?- catch(supported((X is Y + 1, X < 300), t), error(E, _), true).
    true.
-?- catch(no_compound((X is Y * 2), t), error(E, _), true).
+?- catch(supported((X is Y * 2), t), error(E, _), true).
    E = representation_error(evaluable((*)/2)).
+?- supported((p([1,X]), q(f(a))), t).
+   true.
+?- catch(supported((p(X), (q(X) ; r)), t), error(E, _), true).
+   E = representation_error(control_construct((;)/2)).
 
 goal((A, B), G) :- !, ( goal(A, G) ; goal(B, G) ).
 goal(G, G).
-
-compound_in(A, C) :-
-    compound(A),
-    (   A = [H|T] -> ( compound_in(H, C) ; compound_in(T, C) )
-    ;   C = A
-    ).
-
-?- no_compound((p([1,X]), q(a)), t).
-   true.
-?- catch(no_compound((p(X), q([a,f(X)])), t), error(E, _), true).
-   E = representation_error(compound_term(f(X))).
 
 compile_or_throw(Goal, Term) :-
     (   catch(Goal, error(instantiation_error, _),
@@ -146,6 +147,7 @@ clause_key(Clause, Key) :-
         ;   A = [_|_] -> Key = cons
         ;   integer(A) -> Key = A
         ;   atom(A) -> Key = atom(A)
+        ;   functor(A, F, N), Key = functor(F/N)
         )
     ).
 
@@ -158,6 +160,9 @@ clause_key(Clause, Key) :-
 % An atom is wrapped, so that p(any) is not keyed like p(X).
 ?- clause_key(colour(any), Key).
    Key = atom(any).
+% A structure is keyed on its functor, a list on cons whatever its length.
+?- clause_key(solve((A, B)), Key).
+   Key = functor((',')/2).
 % A variable first argument matches anything, and so does no argument at all.
 ?- clause_key(f(X), Key).
    Key = any.
@@ -325,6 +330,16 @@ match_arg(L, Last) -->
     match_arg(H, notlast), % the tail still follows the head
     match_arg(T, last),    % the tail is the last part of the cell
     (   { Last == last } -> [] ; [pop] ).
+match_arg(S, Last) -->
+    { compound(S), S \= [_|_], functor(S, F, N), S =.. [_|Args] },
+    (   { Last == last } -> [lastfunctor(F/N, N)] ; [functor(F/N, N)] ),
+    components(Args), % its last argument is the last part of the cell
+    (   { Last == last } -> [] ; [pop] ).
+
+%% components(+Args)// is semidet.
+%  Matches the arguments of a structure, all but the last followed by more.
+components([A]) --> !, match_arg(A, last).
+components([A|As]) --> match_arg(A, notlast), components(As).
 
 % [] is a constant: nothing to go into.
 ?- phrase(match_args([[]], 8), Is).
@@ -349,6 +364,14 @@ match_arg(L, Last) -->
 % [[1]]: the inner [1] is a head, its tail [] follows it, so it needs its own pop.
 ?- phrase(match_args([[[1]], 2], 8), Is).
    Is = [conslist, conslist, immed(1), constnil, pop, constnil, pop, immed(2)].
+
+% A structure is like a list cell: functor, its arguments, then pop.
+?- phrase(match_args([f(a, X), 1], 8), Is).
+   Is = [functor(f/2, 2), constant(a), firstvar(X), pop, immed(1)].
+?- phrase(match_args([g(f(1))], 8), Is).
+   Is = [lastfunctor(g/1, 1), lastfunctor(f/1, 1), immed(1)].
+?- phrase(match_args([[f(1)]], 8), Is).
+   Is = [lastconslist, functor(f/1, 1), immed(1), pop, constnil].
 
 % An unbound tail is a variable, not a list: exactly one answer, T stays unbound.
 ?- phrase(match_args([[1|T]], 8), Is).

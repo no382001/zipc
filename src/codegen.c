@@ -13,6 +13,8 @@ static const char *operand_name(zip_operand_t kind) {
     return "procedure";
   case OPERAND_CONSTANT:
     return "constant";
+  case OPERAND_FUNCTOR:
+    return "functor";
   }
   return "?";
 }
@@ -47,5 +49,6 @@ int main(void) {
   printf("image_term(integer, %" PRIu8 ").\n", (uint8_t)IMAGE_TERM_INTEGER);
   printf("image_term(procedure, %" PRIu8 ").\n", (uint8_t)IMAGE_TERM_PROCEDURE);
   printf("image_term(atom, %" PRIu8 ").\n", (uint8_t)IMAGE_TERM_ATOM);
+  printf("image_term(functor, %" PRIu8 ").\n", (uint8_t)IMAGE_TERM_FUNCTOR);
   return 0;
 }

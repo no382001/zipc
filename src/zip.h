@@ -10,41 +10,55 @@ enum {
   TAG_REFERENCE = 0,
   TAG_INTEGER = 1,
   TAG_ATOM = 2,
-  TAG_CONS = 3,
+  TAG_COMPOUND = 3, // a cons cell, or a structure if it starts with a functor
   TAG_MASK = 3,
 };
+
+// An atom-tagged word with this bit set is a functor: never a term itself,
+// only the first word of a structure.
+#define FUNCTOR_BIT 4
 
 #define TAG(w) ((w) & TAG_MASK)
 #define POINTER(w) ((word_t *)((w) & ~(word_t)TAG_MASK))
 #define MAKE_REFERENCE(p) ((word_t)(p))
-#define MAKE_CONS(p) ((word_t)(p) | TAG_CONS)
+#define MAKE_COMPOUND(p) ((word_t)(p) | TAG_COMPOUND)
 #define MAKE_INTEGER(n) (((word_t)(intptr_t)(n) << 2) | TAG_INTEGER)
 #define INTEGER_VALUE(w) ((intptr_t)(w) >> 2)
-#define MAKE_ATOM(i) (((word_t)(i) << 2) | TAG_ATOM)
-#define ATOM_INDEX(w) ((w) >> 2)
+#define MAKE_ATOM(i) (((word_t)(i) << 3) | TAG_ATOM)
+#define ATOM_INDEX(w) ((w) >> 3)
+#define MAKE_FUNCTOR(i, n)                                                     \
+  (((word_t)(i) << 11) | ((word_t)(n) << 3) | FUNCTOR_BIT | TAG_ATOM)
+#define FUNCTOR_ATOM(w) ((w) >> 11)
+#define FUNCTOR_ARITY(w) (((w) >> 3) & 0xFF)
+#define IS_FUNCTOR(w)                                                          \
+  (((w) & (FUNCTOR_BIT | TAG_MASK)) == (FUNCTOR_BIT | TAG_ATOM))
+// A compound word is a structure when its cell starts with a functor.
+#define IS_STRUCTURE(w) (IS_FUNCTOR(POINTER(w)[0]))
 
 #define ATOM_NIL MAKE_ATOM(0)
 
 typedef enum {
-  OPCODE_VOID = 1,      // unify an anonymous variable
-  OPCODE_VAR = 4,       // unify subsequent occurrence of variable
-  OPCODE_FIRSTVAR = 5,  // unify first occurrence of local or temporary variable
-  OPCODE_POP = 7,       // complete a compound term
-  OPCODE_SKIPVAR = 8,   // unify first occurrence of an argument variable
-  OPCODE_CONSTANT = 11, // unify constant
-  OPCODE_ENTER = 12,    // the neck of a clause
-  OPCODE_RETURN = 13,   // the neck of a unit clause
-  OPCODE_ARGMODE = 14,  // the neck of a doublet clause
-  OPCODE_DEPART = 16,   // call the last goal in a clause
-  OPCODE_CALL = 17,     // call a goal
-  OPCODE_PROCEED = 18,  // call the only goal in a clause
-  OPCODE_FAIL = 19,     // compiled fail
-  OPCODE_CUT = 20,      // remove the choice points made since the call
-  OPCODE_IMMED = 27,    // unify constant small integer
-  OPCODE_CONSLIST = 33, // unify the functor '.' of arity 2
+  OPCODE_VOID = 1,     // unify an anonymous variable
+  OPCODE_VAR = 4,      // unify subsequent occurrence of variable
+  OPCODE_FIRSTVAR = 5, // unify first occurrence of local or temporary variable
+  OPCODE_POP = 7,      // complete a compound term
+  OPCODE_SKIPVAR = 8,  // unify first occurrence of an argument variable
+  OPCODE_FUNCTOR = 9,  // unify functor of arity n
+  OPCODE_LASTFUNCTOR = 10, // unify last functor in a nested term
+  OPCODE_CONSTANT = 11,    // unify constant
+  OPCODE_ENTER = 12,       // the neck of a clause
+  OPCODE_RETURN = 13,      // the neck of a unit clause
+  OPCODE_ARGMODE = 14,     // the neck of a doublet clause
+  OPCODE_DEPART = 16,      // call the last goal in a clause
+  OPCODE_CALL = 17,        // call a goal
+  OPCODE_PROCEED = 18,     // call the only goal in a clause
+  OPCODE_FAIL = 19,        // compiled fail
+  OPCODE_CUT = 20,         // remove the choice points made since the call
+  OPCODE_IMMED = 27,       // unify constant small integer
+  OPCODE_CONSLIST = 33,    // unify the functor '.' of arity 2
   OPCODE_LASTCONSLIST =
       34, // unify the last functor '.' of arity 2 in a nested term
-  OPCODE_CONSTNIL = 35, // unify the constant '[]'
+  OPCODE_CONSTNIL = 35,  // unify the constant '[]'
   OPCODE_PUSHVAR = 40,   // push the value of a local
   OPCODE_PUSHIMMED = 41, // push a small integer
   OPCODE_PUSHCONST = 42, // push an integer constant
@@ -59,7 +73,7 @@ typedef enum {
   OPCODE_GE = 51,
   OPCODE_EQ = 52,
   OPCODE_NE = 53,
-  OPCODE_HALT = 63,     // not ZIP: return control to the host
+  OPCODE_HALT = 63, // not ZIP: return control to the host
 } zip_opcode_t;
 
 typedef enum {
@@ -67,6 +81,7 @@ typedef enum {
   OPERAND_LOCAL,     // frame offset from the current frame
   OPERAND_PROCEDURE, // external reference slot holding a procedure
   OPERAND_CONSTANT,  // external reference slot holding a constant word
+  OPERAND_FUNCTOR,   // external reference slot holding a functor word
 } zip_operand_t;
 
 #define ZIP_MAX_OPERANDS 2
@@ -96,7 +111,7 @@ enum {
 };
 
 #define KEY_ANY ((word_t)0)
-#define KEY_CONS ((word_t)TAG_CONS)
+#define KEY_CONS ((word_t)TAG_COMPOUND) // a structure's key is its functor
 
 typedef struct zip_procedure zip_procedure_t;
 typedef struct zip_clause zip_clause_t;

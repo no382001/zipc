@@ -1,19 +1,9 @@
-% phase 2: atoms and structures
-
-solve(true).
-solve((A,B)) :- solve(A), solve(B).
-solve(H) :- rule(H, B), solve(B).
-
-rule(app([], L, L), true).
-rule(app([H|T], L, [H|R]), app(T, L, R)).
-rule(nrev([], []), true).
-rule(nrev([H|T], R), (nrev(T, RT), app(RT, [H], R))).
-
-?- solve(app(X, Y, [1,2,3])).   % 4 answers
-?- solve(nrev([1,2,3], R)).     % R = [3,2,1]
-
-% phase 3: cut
-
-solve(true) :- !.
-solve((A,B)) :- !, solve(A), solve(B).
-solve(H) :- rule(H, B), solve(B).
+- trilog should drop the pico target, it can stay as an interpreter and even integrate this project as its runtime
+- this repo will take the pico target and sidestep dynamic compilation by running bytecode over the network on demand
+- keep Scryer for compilation, trilog could compile as well but Scryer has more libraries
+- TCP/IP stack on the rpi2040 running 9P
+- a compiled ZIP image can be copied and loaded over 9P like: `cp program.bin /mnt/pico/image`
+- a ZIP compiled bytecode validator will run throu it, checking for ZIP version and general compatibility (opcodes and board gpio capatibilties)
+- each board should have a queriable gpio table in prolog, so the sender knows what programs could work
+- there should be a file that you write your queries in, trilog's parse.c could be reused for this, it should be possible to run a query from a loaded image aswell
+- there should be an output file where you can stream ZIP's output

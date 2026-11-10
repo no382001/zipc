@@ -51,7 +51,10 @@ procedures_atoms([_-Cs|Ps]) --> clauses_atoms(Cs), procedures_atoms(Ps).
 
 clauses_atoms([]) --> [].
 clauses_atoms([clause(Key, Is)|Cs]) -->
-    ( { Key = atom(A) } -> [A] ; [] ),
+    (   { Key = atom(A) } -> [A]
+    ;   { Key = functor(F/_), F \== [] } -> [F]
+    ;   []
+    ),
     instructions_atoms(Is),
     clauses_atoms(Cs).
 
@@ -60,7 +63,10 @@ queries_atoms([query(_, _, Is)|Qs]) --> instructions_atoms(Is), queries_atoms(Qs
 
 instructions_atoms([]) --> [].
 instructions_atoms([I|Is]) -->
-    ( { I = constant(A), atom(A), A \== [] } -> [A] ; [] ),
+    (   { I = constant(A), atom(A), A \== [] } -> [A]
+    ;   { I =.. [Op, F/_, _], memberchk(Op, [functor, lastfunctor]), F \== [] } -> [F]
+    ;   []
+    ),
     instructions_atoms(Is).
 
 first_occurrences(Xs, Ys) :- first_occurrences(Xs, [], Ys).
@@ -72,6 +78,9 @@ first_occurrences([X|Xs], Seen, Ys) :-
     first_occurrences(Xs, [X|Seen], Ys1).
 
 atom_index(A, _-Atoms, I) :- nth1(I, Atoms, A), !.
+
+% Atom 0 is [], which can name a functor aswell.
+functor_atom_index(F, Tables, I) :- ( F == [] -> I = 0 ; atom_index(F, Tables, I) ).
 
 procedures([], _) --> [].
 
@@ -93,8 +102,9 @@ key(nil, _) --> term(nil).
 key(cons, _) --> term(cons).
 key(N, _) --> { integer(N) }, term(integer), encode:i32(N).
 key(atom(A), Tables) --> { atom_index(A, Tables, I) }, term(atom), encode:u16(I).
+key(functor(F/N), Tables) --> functor(F/N, Tables).
 key(K, _) -->
-    { \+ memberchk(K, [any, nil, cons]), \+ integer(K), K \= atom(_),
+    { \+ memberchk(K, [any, nil, cons]), \+ integer(K), K \= atom(_), K \= functor(_),
       throw(error(domain_error(zip_key, K), key//2)) }.
 
 queries([], _) --> [].
@@ -152,6 +162,12 @@ operand(constant, C, _, References0, References) -->
       ),
       reference_slot(constant(C), Slot, References0, References) },
     [Slot].
+operand(functor, F/N, _, References0, References) -->
+    { (   atom(F), integer(N), N >= 1, N =< 255 -> true
+      ;   throw(error(domain_error(zip_functor, F/N), instruction//3))
+      ),
+      reference_slot(functor(F/N), Slot, References0, References) },
+    [Slot].
 
 reference_slot(R, Slot, References0, References) :-
     (   nth1(Slot, References0, R) -> References = References0
@@ -167,6 +183,10 @@ reference(procedure(P), Names-_) --> { nth0(I, Names, P) }, term(procedure), enc
 reference(constant([]), _) --> !, term(nil).
 reference(constant(A), Tables) --> { atom(A), atom_index(A, Tables, I) }, term(atom), encode:u16(I).
 reference(constant(N), _) --> { integer(N) }, term(integer), encode:i32(N).
+reference(functor(F/N), Tables) --> functor(F/N, Tables).
+
+functor(F/N, Tables) -->
+    { functor_atom_index(F, Tables, I) }, term(functor), encode:u16(I), encode:u8(N).
 
 %%%% Encoding
 

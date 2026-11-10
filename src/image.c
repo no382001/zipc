@@ -75,6 +75,19 @@ static bool read_atom(reader_t *r, word_t *atom) {
   return true;
 }
 
+static bool read_functor(reader_t *r, word_t *functor) {
+  uint16_t index;
+  uint8_t arity;
+  if (!read_u16(r, &index) || !read_u8(r, &arity))
+    return false;
+  if (index >= r->image->atom_count)
+    return fail(r, "atom index out of range");
+  if (arity == 0)
+    return fail(r, "functor of arity 0");
+  *functor = MAKE_FUNCTOR(index, arity);
+  return true;
+}
+
 static bool read_key(reader_t *r, word_t *key) {
   uint8_t term;
   if (!read_u8(r, &term))
@@ -93,6 +106,8 @@ static bool read_key(reader_t *r, word_t *key) {
     return read_integer(r, key);
   case IMAGE_TERM_ATOM:
     return read_atom(r, key);
+  case IMAGE_TERM_FUNCTOR:
+    return read_functor(r, key);
   }
   return fail(r, "bad clause key");
 }
@@ -114,6 +129,9 @@ static bool read_reference(reader_t *r, zip_external_reference_t *reference,
   case IMAGE_TERM_ATOM:
     *kind = OPERAND_CONSTANT;
     return read_atom(r, &reference->value);
+  case IMAGE_TERM_FUNCTOR:
+    *kind = OPERAND_FUNCTOR;
+    return read_functor(r, &reference->value);
   case IMAGE_TERM_PROCEDURE:
     if (!read_u16(r, &index))
       return false;
@@ -140,6 +158,7 @@ static bool ends_clause(zip_opcode_t code) {
 
 // sanity checks
 static bool verify(reader_t *r, const uint8_t *code, uint16_t length,
+                   const zip_external_reference_t *references,
                    const zip_operand_t *kinds, uint8_t reference_count) {
   const zip_opcode_info_t *info = NULL;
   uint16_t i = 0;
@@ -147,15 +166,22 @@ static bool verify(reader_t *r, const uint8_t *code, uint16_t length,
     info = opcode_info(code[i++]);
     if (info == NULL)
       return fail(r, "unknown opcode");
+    word_t functor = 0;
     for (uint8_t j = 0; j < info->operand_count; j++) {
       if (i == length)
         return fail(r, "truncated instruction");
       uint8_t operand = code[i++];
       zip_operand_t kind = info->operands[j];
-      if ((kind == OPERAND_PROCEDURE || kind == OPERAND_CONSTANT) &&
+      if ((kind == OPERAND_PROCEDURE || kind == OPERAND_CONSTANT ||
+           kind == OPERAND_FUNCTOR) &&
           (operand == 0 || operand > reference_count || kinds[operand] != kind))
         return fail(r, "bad external reference operand");
+      if (kind == OPERAND_FUNCTOR)
+        functor = references[operand].value;
     }
+    // the VM builds a structure of the instruction's arity
+    if (functor != 0 && FUNCTOR_ARITY(functor) != code[i - 1])
+      return fail(r, "functor arity mismatch");
   }
   if (info == NULL || !ends_clause(info->code))
     return fail(r, "code falls off its end");
@@ -184,7 +210,7 @@ static bool read_code(reader_t *r, zip_clause_t *clause) {
   uint16_t length;
   const uint8_t *code;
   if (!read_u16(r, &length) || !read_bytes(r, length, &code) ||
-      !verify(r, code, length, kinds, reference_count))
+      !verify(r, code, length, references, kinds, reference_count))
     return false;
   clause->code = code;
   clause->external_references = references;

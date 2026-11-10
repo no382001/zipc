@@ -79,12 +79,24 @@ static void print_term(const zip_machine_t *m, word_t t) {
   case TAG_ATOM:
     print_atom(image.atoms[ATOM_INDEX(t)]);
     break;
-  case TAG_CONS:
+  case TAG_COMPOUND:
+    if (IS_STRUCTURE(t)) {
+      word_t *p = POINTER(t);
+      print_atom(image.atoms[FUNCTOR_ATOM(p[0])]);
+      putchar('(');
+      for (word_t i = 1; i <= FUNCTOR_ARITY(p[0]); i++) {
+        if (i > 1)
+          putchar(',');
+        print_term(m, p[i]);
+      }
+      putchar(')');
+      break;
+    }
     putchar('[');
     for (;;) {
       print_term(m, POINTER(t)[0]);
       t = zip_dereference(POINTER(t)[1]);
-      if (TAG(t) != TAG_CONS)
+      if (TAG(t) != TAG_COMPOUND || IS_STRUCTURE(t))
         break;
       putchar(',');
     }

@@ -110,6 +110,7 @@ args(Is, [A|As]) :- arg_instrs(Is, 0, A, Is1), args(Is1, As).
 
 % A lastconslist at the top is the last argument of a head, which has no pop.
 arg_instrs([lastconslist|Is], 0, [lastconslist|Is], []) :- !.
+arg_instrs([lastfunctor(F, N)|Is], 0, [lastfunctor(F, N)|Is], []) :- !.
 arg_instrs([I|Is], D0, [I|A], Rest) :-
     depth(I, D0, D),
     (   D =:= 0 -> A = [], Rest = Is
@@ -117,6 +118,7 @@ arg_instrs([I|Is], D0, [I|A], Rest) :-
     ).
 
 depth(conslist, D0, D) :- !, D is D0 + 1.
+depth(functor(_, _), D0, D) :- !, D is D0 + 1.
 depth(pop, D0, D) :- !, D is D0 - 1.
 depth(_, D, D).
 
@@ -170,7 +172,7 @@ style(instruction(I), Attrs) :-
     functor(I, Name, _), instruction_style(Name, Style), style(Style, Attrs).
 
 instruction_style(Name, control) :- memberchk(Name, [argmode, enter, return, call, depart, proceed, cut, fail, halt]), !.
-instruction_style(Name, structure) :- memberchk(Name, [conslist, lastconslist, pop]).
+instruction_style(Name, structure) :- memberchk(Name, [conslist, lastconslist, functor, lastfunctor, pop]).
 
 %% sgr(?Attr, ?Code) is nondet.
 %  Code is the ANSI select graphic rendition parameter of Attr, the colors
