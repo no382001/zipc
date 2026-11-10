@@ -71,7 +71,11 @@ static void print_term(const zip_machine_t *m, word_t t) {
   t = zip_dereference(t);
   switch (TAG(t)) {
   case TAG_REFERENCE:
-    printf("_G%td", POINTER(t) - m->global_stack);
+    if (POINTER(t) >= m->local_stack &&
+        POINTER(t) < m->local_stack + ZIP_LOCAL_STACK_WORDS)
+      printf("_L%td", POINTER(t) - m->local_stack);
+    else
+      printf("_G%td", POINTER(t) - m->global_stack);
     break;
   case TAG_INTEGER:
     printf("%" PRIdPTR, INTEGER_VALUE(t));

@@ -27,6 +27,8 @@ const zip_opcode_info_t zip_opcodes[] = {
     {OPCODE_FAIL, "fail", 0, {0}},
     {OPCODE_CUT, "cut", 0, {0}},
     {OPCODE_IMMED, "immed", 1, {OPERAND_BYTE}},
+    {OPCODE_GLOFIRVAR, "glofirvar", 1, {OPERAND_LOCAL}},
+    {OPCODE_GLOVAR, "glovar", 1, {OPERAND_LOCAL}},
     {OPCODE_CONSLIST, "conslist", 0, {0}},
     {OPCODE_LASTCONSLIST, "lastconslist", 0, {0}},
     {OPCODE_CONSTNIL, "constnil", 0, {0}},
@@ -70,11 +72,22 @@ static word_t *new_global(zip_machine_t *m, size_t count) {
   return p;
 }
 
+static bool is_local(const zip_machine_t *m, const word_t *p) {
+  return p >= m->local_stack && p < m->local_stack + ZIP_LOCAL_STACK_WORDS;
+}
+
+// Whether the variable at p is older than the newest choice point. Frames
+// made since lie above the choice point frame, global cells above its mark.
+static bool older_than_choice(const zip_machine_t *m, const word_t *p) {
+  word_t *b = m->backtrack_frame;
+  return b != NULL &&
+         (is_local(m, p) ? p < b : p < (word_t *)b[FRAME_GLOBAL_MARK]);
+}
+
 static bool bind(zip_machine_t *m, word_t *variable, word_t value) {
   *variable = value;
   // only variables older than the newest choice point need undoing.
-  if (m->backtrack_frame != NULL &&
-      variable < (word_t *)m->backtrack_frame[FRAME_GLOBAL_MARK]) {
+  if (older_than_choice(m, variable)) {
     if (m->trail_top == m->trail + ZIP_TRAIL_WORDS) {
       m->error = "trail overflow";
       return false;
@@ -94,10 +107,11 @@ static bool unify(zip_machine_t *m, word_t a, word_t b) {
     b = zip_dereference(b);
     if (a != b) {
       if (TAG(a) == TAG_REFERENCE && TAG(b) == TAG_REFERENCE) {
-        // bind the younger variable to the older one
-        // bc of conditional trailing
-        // and every variable is global now!
-        if (POINTER(a) < POINTER(b)) {
+        // a frame variable is bound to a global one, so nothing global
+        // points into a frame; otherwise the younger is bound to the older,
+        // which needs no trailing and leaves no pointer into a newer frame.
+        bool la = is_local(m, POINTER(a)), lb = is_local(m, POINTER(b));
+        if (la != lb ? lb : POINTER(a) < POINTER(b)) { // bind b
           if (!bind(m, POINTER(b), a))
             return false;
         } else if (!bind(m, POINTER(a), b)) {
@@ -140,6 +154,19 @@ static bool unify(zip_machine_t *m, word_t a, word_t b) {
     b = pending[--n];
     a = pending[--n];
   }
+}
+
+// Moves the unbound frame variable *w to a new global cell, and makes *w a
+// reference to it.
+static bool globalize(zip_machine_t *m, word_t *w) {
+  word_t *p = new_global(m, 1);
+  if (p == NULL)
+    return false;
+  *p = MAKE_REFERENCE(p);
+  if (!bind(m, POINTER(*w), MAKE_REFERENCE(p)))
+    return false;
+  *w = MAKE_REFERENCE(p);
+  return true;
 }
 
 static bool push_context(zip_machine_t *m) {
@@ -327,15 +354,25 @@ zip_status_t zip_run(zip_machine_t *m) {
     }
 
     case DISPATCH(MODE_MATCH, OPCODE_FIRSTVAR):
+    case DISPATCH(MODE_MATCH, OPCODE_GLOFIRVAR):
       m->current_frame[*m->program_counter++] = *m->data++;
       break;
-    case DISPATCH(MODE_COPY, OPCODE_FIRSTVAR): {
+    case DISPATCH(MODE_COPY, OPCODE_FIRSTVAR):
+    case DISPATCH(MODE_COPY, OPCODE_GLOFIRVAR): {
       word_t *p = m->data++;
       *p = MAKE_REFERENCE(p);
       m->current_frame[*m->program_counter++] = MAKE_REFERENCE(p);
       break;
     }
+    // A variable first met in a goal lives in its slot in this frame.
     case DISPATCH(MODE_ARGUMENT, OPCODE_FIRSTVAR): {
+      word_t *p = &m->current_frame[*m->program_counter++];
+      *p = MAKE_REFERENCE(p);
+      *m->data++ = MAKE_REFERENCE(p);
+      break;
+    }
+    // The last goal may take over this frame, so its variables go global.
+    case DISPATCH(MODE_ARGUMENT, OPCODE_GLOFIRVAR): {
       word_t *p = new_global(m, 1);
       if (p == NULL)
         goto fail;
@@ -345,12 +382,29 @@ zip_status_t zip_run(zip_machine_t *m) {
     }
 
     case DISPATCH(MODE_MATCH, OPCODE_VAR):
+    case DISPATCH(MODE_MATCH, OPCODE_GLOVAR):
       if (!unify(m, m->current_frame[*m->program_counter++], *m->data++))
         goto fail;
       break;
-    case DISPATCH(MODE_COPY, OPCODE_VAR):
     case DISPATCH(MODE_ARGUMENT, OPCODE_VAR):
       *m->data++ = m->current_frame[*m->program_counter++];
+      break;
+    // A structure is global, so it must not point to a frame variable.
+    case DISPATCH(MODE_COPY, OPCODE_VAR):
+    case DISPATCH(MODE_COPY, OPCODE_GLOVAR):
+      c = zip_dereference(m->current_frame[*m->program_counter++]);
+      if (TAG(c) == TAG_REFERENCE && is_local(m, POINTER(c)) &&
+          !globalize(m, &c))
+        goto fail;
+      *m->data++ = c;
+      break;
+    // Only a variable of this frame is unsafe: older frames outlive the call.
+    case DISPATCH(MODE_ARGUMENT, OPCODE_GLOVAR):
+      c = zip_dereference(m->current_frame[*m->program_counter++]);
+      if (TAG(c) == TAG_REFERENCE && POINTER(c) >= m->current_frame &&
+          is_local(m, POINTER(c)) && !globalize(m, &c))
+        goto fail;
+      *m->data++ = c;
       break;
 
     case DISPATCH(MODE_MATCH, OPCODE_CONSLIST):

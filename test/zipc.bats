@@ -61,7 +61,7 @@ EOF
 ?- first([a,b,c],X).
    X = a.
 ?- first(L,a).
-   L = [a|_G2].
+   L = [a|_G1].
 ?- first(['hello world'],X).
    X = 'hello world'.
 ?- first([[]],X).
@@ -123,7 +123,7 @@ EOF
 ?- first([1,2],X).
    X = 1.
 ?- first(L,1).
-   L = [1|_G2].
+   L = [1|_G1].
 ?- h(R).
    R = 1.
 EOF
@@ -447,4 +447,26 @@ EOF2
     run --separate-stderr "$ZIPC" -r "$T/n.pl"
     [ "$status" -eq 0 ]
     [ "$output" = "$(printf '?- n(X).\n   X = 300\n;  X = -1.\n?- n(300).\n   true.')" ]
+}
+
+@test "frame variables outlive neither their frame nor a backtrack" {
+    run_program locals <<'EOF'
+?- mk(X),clobber(10),same(X,f(Z)),same(Z,1).
+   X = f(1), Z = 1.
+?- mk(X),clobber(10).
+   X = f(_G0).
+?- older(X),clobber(10),same(X,5).
+   X = 5.
+?- older(X),clobber(10).
+   X = _L8.
+?- inside(X),clobber(10),same(X,g(1)).
+   X = g(1).
+?- down(X).
+   X = 7.
+?- pick(X),clobber(3).
+   X = a
+;  X = b.
+?- id(X),id(Y),same(X,Y),clobber(5),same(Y,2).
+   X = 2, Y = 2.
+EOF
 }

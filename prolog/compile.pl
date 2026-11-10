@@ -186,35 +186,36 @@ body(G, Singles, Locals, Seen, FrameSize) --> { arithmetic(G) }, !,
     [return(FrameSize)].
 body((A,B), Singles, Locals, Seen, FrameSize) --> !,
     [enter(FrameSize)],
-    goals((A,B), Singles, Locals, Seen, FrameSize).
+    goals((A,B), Singles, Locals, Seen, Seen, FrameSize).
 body(Goal, Singles, Locals, Seen, FrameSize) -->
     { functor(Goal, F, N), Goal =.. [_|Args] },
     [argmode(FrameSize)],
-    goal_args(Args, Singles, Locals, Seen, _),
+    last_goal_args(Args, Singles, Locals, Seen, Seen),
     [proceed(F/N, N)].
 
-%% goals(+Goals, +Singles, +Locals, +Seen, +FrameSize)// is semidet.
+%% goals(+Goals, +Singles, +Locals, +Seen, +Head, +FrameSize)// is semidet.
 %  Each goal pushes its arguments; all but the last are called, the last departs.
-goals((!,B), Singles, Locals, Seen, FrameSize) --> !,
+%  Head are the variables the head met, which never live in this frame.
+goals((!,B), Singles, Locals, Seen, Head, FrameSize) --> !,
     [cut],
-    goals(B, Singles, Locals, Seen, FrameSize).
-goals((fail,_), _, _, _, _) --> !, [fail].
-goals((A,B), Singles, Locals, Seen0, FrameSize) --> { arithmetic(A) }, !,
+    goals(B, Singles, Locals, Seen, Head, FrameSize).
+goals((fail,_), _, _, _, _, _) --> !, [fail].
+goals((A,B), Singles, Locals, Seen0, Head, FrameSize) --> { arithmetic(A) }, !,
     arithmetic(A, Singles, Locals, Seen0, Seen),
-    goals(B, Singles, Locals, Seen, FrameSize).
-goals((A,B), Singles, Locals, Seen0, FrameSize) --> !,
+    goals(B, Singles, Locals, Seen, Head, FrameSize).
+goals((A,B), Singles, Locals, Seen0, Head, FrameSize) --> !,
     { functor(A, F, N), A =.. [_|Args] },
     goal_args(Args, Singles, Locals, Seen0, Seen),
     [call(F/N)],
-    goals(B, Singles, Locals, Seen, FrameSize).
-goals(!, _, _, _, FrameSize) --> !, [cut, return(FrameSize)].
-goals(fail, _, _, _, _) --> !, [fail].
-goals(A, Singles, Locals, Seen, FrameSize) --> { arithmetic(A) }, !,
+    goals(B, Singles, Locals, Seen, Head, FrameSize).
+goals(!, _, _, _, _, FrameSize) --> !, [cut, return(FrameSize)].
+goals(fail, _, _, _, _, _) --> !, [fail].
+goals(A, Singles, Locals, Seen, _, FrameSize) --> { arithmetic(A) }, !,
     arithmetic(A, Singles, Locals, Seen, _),
     [return(FrameSize)].
-goals(A, Singles, Locals, Seen0, _) -->
+goals(A, Singles, Locals, Seen0, Head, _) -->
     { functor(A, F, N), A =.. [_|Args] },
-    goal_args(Args, Singles, Locals, Seen0, _),
+    last_goal_args(Args, Singles, Locals, Seen0, Head),
     [depart(F/N, N)].
 
 %% goal_args(+Args, +Singles, +Locals, +Seen0, -Seen)// is semidet.
@@ -223,6 +224,33 @@ goals(A, Singles, Locals, Seen0, _) -->
 goal_args(Args, Singles, Locals, Seen0, Seen) -->
     { phrase(foldl(\A^match_arg(A, notlast), Args), Instrs0) },
     slots(Instrs0, Singles, Locals, Seen0, Seen).
+
+%% last_goal_args(+Args, +Singles, +Locals, +Seen, +Head)// is semidet.
+%  Like goal_args//5, but the last goal can take over the frame, so a variable
+%  that is a whole argument and may live in the frame is glofirvar or glovar,
+%  which make it global. A variable of the head never lives in the frame.
+last_goal_args(Args, Singles, Locals, Seen, Head) -->
+    { phrase(goal_args(Args, Singles, Locals, Seen, _), Is0),
+      foldl(Head+\I0^I^D0^D^global_arg(I0, I, Head, D0, D), Is0, Is, 0, _) },
+    seq(Is).
+
+%% global_arg(+Instr0, -Instr, +Head, +Depth0, -Depth) is det.
+%  Depth counts the structures Instr0 is in; inside one a variable is copied
+%  to the global stack anyway.
+global_arg(firstvar(S), glofirvar(S), _, 0, 0) :- !.
+global_arg(var(S), I, Head, 0, 0) :- !,
+    ( member(_-S0, Head), S0 == S -> I = var(S) ; I = glovar(S) ).
+global_arg(I, I, _, D0, D) :-
+    (   ( I == conslist ; I = functor(_, _) ) -> D is D0 + 1
+    ;   I == pop -> D is D0 - 1
+    ;   D = D0
+    ).
+
+?- phrase(last_goal_args([X, f(X, Y), Y], [], [X-9, Y-10], [], []), Is).
+   Is = [glofirvar(9), functor(f/2, 2), var(9), firstvar(10), pop, glovar(10)].
+% The head's X is passed as it is, the body's Y may live in the frame.
+?- phrase(last_goal_args([X, Y], [], [], [X-8, Y-10], [X-8]), Is).
+   Is = [var(8), glovar(10)].
 
 % A fact: no goal to call, just return.
 ?- phrase(body(true, [], [], [], 11), Is).
@@ -240,9 +268,9 @@ goal_args(Args, Singles, Locals, Seen0, Seen) -->
 ?- phrase(body(g, [], [], [], 11), Is).
    Is = [argmode(11), proceed(g/0, 0)].
 
-% A variable the head never saw is a firstvar in its local slot.
+% A variable the head never saw is a glofirvar in the last goal: it goes global.
 ?- phrase(body(f(C), [], [C-11], [], 12), Is).
-   Is = [argmode(12), firstvar(11), proceed(f/1, 1)].
+   Is = [argmode(12), glofirvar(11), proceed(f/1, 1)].
 
 % A list argument is built, and ends in pop.
 ?- phrase(body(f([A]), [], [], [A-8], 9), Is).
@@ -251,9 +279,9 @@ goal_args(Args, Singles, Locals, Seen0, Seen) -->
 ?- phrase(body((f(A), g(A)), [], [], [A-8], 9), Is).
    Is = [enter(9), var(8), call(f/1), var(8), depart(g/1, 1)].
 
-% A variable first met in one goal is a var in the next.
+% A variable first met in one goal lives in the frame, and is a glovar in the last.
 ?- phrase(body((f(C), g(C)), [], [C-9], [], 10), Is).
-   Is = [enter(10), firstvar(9), call(f/1), var(9), depart(g/1, 1)].
+   Is = [enter(10), firstvar(9), call(f/1), glovar(9), depart(g/1, 1)].
 
 ?- phrase(body((f, !, g), [], [], [], 8), Is).
    Is = [enter(8), call(f/0), cut, depart(g/0, 0)].
@@ -493,7 +521,7 @@ number_slots(Vars, Slot0, Locals, FrameSize) :- % the next free slot is the fram
        proceed(concatenate/3, 3)
    ]).
 
-% RT is first met in the body: firstvar in the first goal, var in the second.
+% RT is first met in the body: firstvar in the first goal, glovar in the last.
 ?- compile_procedure((nrev([H|T], R) :- nrev(T, RT), concatenate(RT, [H], R)), Proc).
    Proc = procedure(nrev/2, [
        conslist,
@@ -505,7 +533,7 @@ number_slots(Vars, Slot0, Locals, FrameSize) :- % the next free slot is the fram
        var(10),
        firstvar(11),
        call(nrev/2),
-       var(11),
+       glovar(11),
        conslist,
        var(12),
        constnil,

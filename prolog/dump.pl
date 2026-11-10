@@ -136,6 +136,8 @@ dump_instruction(Names, Slot, I) :-
 % skipvar leaves the variable in the argument slot of its line.
 instruction_slot(var(S), _, S).
 instruction_slot(firstvar(S), _, S).
+instruction_slot(glovar(S), _, S).
+instruction_slot(glofirvar(S), _, S).
 instruction_slot(skipvar, S, S).
 instruction_slot(pushvar(S), _, S).
 instruction_slot(isvar(S), _, S).

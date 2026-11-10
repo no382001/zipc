@@ -55,7 +55,9 @@ typedef enum {
   OPCODE_FAIL = 19,        // compiled fail
   OPCODE_CUT = 20,         // remove the choice points made since the call
   OPCODE_IMMED = 27,       // unify constant small integer
-  OPCODE_CONSLIST = 33,    // unify the functor '.' of arity 2
+  OPCODE_GLOFIRVAR = 29,   // unify first occurrence of variable in last goal
+  OPCODE_GLOVAR = 30,   // unify subsequent occurrence of variable in last goal
+  OPCODE_CONSLIST = 33, // unify the functor '.' of arity 2
   OPCODE_LASTCONSLIST =
       34, // unify the last functor '.' of arity 2 in a nested term
   OPCODE_CONSTNIL = 35,  // unify the constant '[]'
